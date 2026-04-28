@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 last_request_time = time.time()
-is_unloaded = False
+is_unloaded = True
 is_loading = False
 
 import torch
@@ -188,10 +188,6 @@ async def idle_monitor():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global is_loading
-    is_loading = True
-    # Start loading in background thread so the server can respond to health checks
-    _run_inference(load_model)
     task = asyncio.create_task(idle_monitor())
     yield
     task.cancel()

@@ -68,7 +68,7 @@ export default function ModelStatusBadge({ status, onLoad, onUnload }: ModelStat
         <button 
           onClick={onLoad}
           title="Load model into GPU memory"
-          className="ml-2 flex items-center gap-1 overflow-hidden max-w-[100px] opacity-100 transition-all duration-300 ease-in-out text-emerald-400 hover:text-emerald-300"
+          className="ml-2 flex items-center gap-1 overflow-hidden max-w-0 opacity-0 group-hover:max-w-[100px] group-hover:opacity-100 transition-all duration-300 ease-in-out text-emerald-400 hover:text-emerald-300"
         >
           <Play size={12} />
           <span className="text-[10px] font-mono font-bold uppercase whitespace-nowrap">
