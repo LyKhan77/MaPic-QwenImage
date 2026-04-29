@@ -176,6 +176,15 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
           />
 
           <button
+            onClick={() => setShowSettings(!showSettings)}
+            disabled={isLoading || !isModelReady}
+            className={`shrink-0 flex items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-10 w-10 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-2 text-muted-foreground hover:text-foreground'} ${showSettings ? 'text-primary' : ''}`}
+            title="Generation settings"
+          >
+            <Settings2 size={isCentralized ? 18 : 20} />
+          </button>
+
+          <button
             onClick={handleSubmit}
             disabled={!prompt.trim() || isLoading || !isModelReady}
             className={`group shrink-0 flex items-center justify-center transition-all ${isCentralized ? 'h-10 w-10 rounded-full bg-white text-black hover:bg-primary disabled:bg-gray-600' : 'rounded-lg bg-foreground px-4 py-2 text-sm font-bold text-background hover:bg-primary hover:text-primary-foreground'}`}
@@ -186,14 +195,6 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
                     <Send size={14} className="ml-2 transition-transform group-hover:translate-x-1" />
                 </>
             )}
-          </button>
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            disabled={isLoading || !isModelReady}
-            className={`shrink-0 flex items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-10 w-10 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-2 text-muted-foreground hover:text-foreground'} ${showSettings ? 'text-primary' : ''}`}
-            title="Generation settings"
-          >
-            <Settings2 size={isCentralized ? 18 : 20} />
           </button>
         </div>
 
