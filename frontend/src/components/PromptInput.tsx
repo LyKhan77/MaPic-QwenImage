@@ -1,9 +1,15 @@
 import { useState, type KeyboardEvent, useRef, useEffect } from 'react'
-import { Send, Paperclip, X, ChevronDown } from 'lucide-react'
+import { Send, Paperclip, X, ChevronDown, Settings2 } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 import type { ModelStatus } from '../lib/api'
 
+export interface GenerationOptions {
+  num_inference_steps?: number
+  guidance_scale?: number
+}
+
 interface PromptInputProps {
-  onGenerate: (prompt: string, images?: string[]) => void
+  onGenerate: (prompt: string, images?: string[], options?: GenerationOptions) => void
   isLoading: boolean
   isCentralized?: boolean
   onTyping?: (isTyping: boolean) => void
@@ -16,6 +22,9 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
   const [prompt, setPrompt] = useState('')
   const [showReferences, setShowReferences] = useState(true)
   const [images, setImages] = useState<{ id: string; base64: string }[]>([])
+  const [showSettings, setShowSettings] = useState(false)
+  const [steps, setSteps] = useState(50)
+  const [guidance, setGuidance] = useState(1.5)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const isModelReady = modelStatus === 'ready' || modelStatus === undefined
@@ -100,7 +109,11 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
       ? images.map(img => img.base64.includes(',') ? img.base64.split(',')[1] : img.base64)
       : undefined;
 
-    onGenerate(prompt, cleanImages)
+    const options: GenerationOptions = {}
+    if (steps !== 50) options.num_inference_steps = steps
+    if (guidance !== 1.5) options.guidance_scale = guidance
+
+    onGenerate(prompt, cleanImages, Object.keys(options).length > 0 ? options : undefined)
     setPrompt('')
     setImages([])
     if (onTyping) onTyping(false)
@@ -174,6 +187,14 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
                 </>
             )}
           </button>
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            disabled={isLoading || !isModelReady}
+            className={`shrink-0 flex items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-10 w-10 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-2 text-muted-foreground hover:text-foreground'} ${showSettings ? 'text-primary' : ''}`}
+            title="Generation settings"
+          >
+            <Settings2 size={isCentralized ? 18 : 20} />
+          </button>
         </div>
 
         {/* Reference Images Dropdown */}
@@ -207,6 +228,48 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
             )}
           </div>
         )}
+
+        {/* Settings Panel */}
+        <AnimatePresence>
+          {showSettings && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className={`mt-2 border border-border rounded-lg bg-card/40 p-3 space-y-3 ${isCentralized ? 'max-w-md mx-auto' : ''}`}>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-mono text-muted-foreground">Steps</label>
+                  <span className="text-xs font-mono text-foreground tabular-nums">{steps}</span>
+                </div>
+                <input
+                  type="range"
+                  min={20}
+                  max={75}
+                  step={5}
+                  value={steps}
+                  onChange={(e) => setSteps(Number(e.target.value))}
+                  className="w-full h-1 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
+                />
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-mono text-muted-foreground">Guidance</label>
+                  <span className="text-xs font-mono text-foreground tabular-nums">{guidance.toFixed(1)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={1.0}
+                  max={5.0}
+                  step={0.1}
+                  value={guidance}
+                  onChange={(e) => setGuidance(Number(e.target.value))}
+                  className="w-full h-1 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   )

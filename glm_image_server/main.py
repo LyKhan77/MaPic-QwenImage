@@ -173,6 +173,13 @@ def load_model():
             global is_unloaded
             is_unloaded = False
             update_progress(100, "Ready.")
+            # Set AR sampling params to model-recommended defaults
+            # (pipeline hardcodes do_sample=True without passing temperature/top_p)
+            pipe.vision_language_encoder.generation_config.temperature = 0.9
+            pipe.vision_language_encoder.generation_config.top_p = 0.75
+            pipe.vision_language_encoder.generation_config.do_sample = True
+            logger.info("AR sampling config: temperature=0.9, top_p=0.75, do_sample=True")
+
             _log_gpu_memory("after_load")
             logger.info("GLM-Image pipeline ready (multi-GPU, VAE on CPU).")
         except Exception as exc:
@@ -219,6 +226,8 @@ class T2IRequest(BaseModel):
     prompt: str
     size: str = "1024x1024"
     response_format: str = "b64_json"
+    num_inference_steps: int = 50
+    guidance_scale: float = 1.5
 
 
 class I2IRequest(BaseModel):
@@ -226,6 +235,8 @@ class I2IRequest(BaseModel):
     images: list[str]
     size: str = "1024x1024"
     response_format: str = "b64_json"
+    num_inference_steps: int = 35
+    guidance_scale: float = 1.5
 
 
 def _snap_to_32(size: str) -> tuple[int, int]:
@@ -317,8 +328,8 @@ async def text_to_image(req: T2IRequest):
                 prompt=req.prompt,
                 width=width,
                 height=height,
-                num_inference_steps=50,
-                guidance_scale=1.5,
+                num_inference_steps=req.num_inference_steps,
+                guidance_scale=req.guidance_scale,
             )
         )
         img: Image.Image = result.images[0]
@@ -344,8 +355,8 @@ async def image_to_image(req: I2IRequest):
                 image=ref_images,
                 height=height,
                 width=width,
-                num_inference_steps=35,
-                guidance_scale=1.5,
+                num_inference_steps=req.num_inference_steps,
+                guidance_scale=req.guidance_scale,
             )
         )
         img: Image.Image = result.images[0]

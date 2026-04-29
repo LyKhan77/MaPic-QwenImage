@@ -7,6 +7,7 @@ import ImageCanvas from '../components/ImageCanvas'
 import PromptInput from '../components/PromptInput'
 import ModelStatusBadge from '../components/ModelStatusBadge'
 import type { Generation } from '../types'
+import type { GenerationOptions } from '../components/PromptInput'
 import { Toaster, toast } from 'sonner'
 
 interface DashboardProps {
@@ -58,7 +59,7 @@ export default function Dashboard({ session }: DashboardProps) {
 
   // Generate Mutation
   const generateMutation = useMutation({
-    mutationFn: ({ prompt, images }: { prompt: string; images?: string[] }) => api.generateImage(prompt, session.user.id, images),
+    mutationFn: ({ prompt, images, options }: { prompt: string; images?: string[]; options?: GenerationOptions }) => api.generateImage(prompt, session.user.id, images, options),
     onMutate: () => {
       setCurrentGen(null)
     },
@@ -148,14 +149,14 @@ export default function Dashboard({ session }: DashboardProps) {
              currentGeneration={currentGen}
              isLoading={generateMutation.isPending}
              modelStatus={modelStatus}
-             onGenerate={(prompt, images) => generateMutation.mutate({ prompt, images })}
+             onGenerate={(prompt, images, options) => generateMutation.mutate({ prompt, images, options })}
            />
         </div>
 
         {currentGen && (
           <div className="shrink-0 w-full bg-background relative z-20">
             <PromptInput
-              onGenerate={(prompt, images) => generateMutation.mutate({ prompt, images })}
+              onGenerate={(prompt, images, options) => generateMutation.mutate({ prompt, images, options })}
               isLoading={generateMutation.isPending}
               isCentralized={false}
               initialPrompt={currentGen.prompt}

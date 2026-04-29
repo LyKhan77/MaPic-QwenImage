@@ -56,15 +56,20 @@ async def unload_model() -> dict:
         return resp.json()
 
 
-async def generate_image_bytes(prompt: str, images: list[str] | None = None) -> bytes:
+async def generate_image_bytes(prompt: str, images: list[str] | None = None, num_inference_steps: int = 50, guidance_scale: float = 1.5) -> bytes:
     url = GLM_IMAGE_API_URL.rstrip("/")
+
+    payload = {
+        "prompt": prompt,
+        "num_inference_steps": num_inference_steps,
+        "guidance_scale": guidance_scale,
+    }
 
     if images:
         endpoint = f"{url}/v1/images/edits"
-        payload = {"prompt": prompt, "images": images}
+        payload["images"] = images
     else:
         endpoint = f"{url}/v1/images/generations"
-        payload = {"prompt": prompt}
 
     last_exc = None
 

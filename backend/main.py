@@ -76,7 +76,7 @@ async def api_unload():
 @app.post("/api/generate", response_model=Generation)
 async def generate(payload: GenerateRequest):
     try:
-        image_bytes = await generate_image_bytes(payload.prompt, payload.images)
+        image_bytes = await generate_image_bytes(payload.prompt, payload.images, payload.num_inference_steps, payload.guidance_scale)
         image_path, public_url = upload_image(payload.user_id, image_bytes)
         record = insert_generation(payload.user_id, payload.prompt, image_path, public_url)
         return record

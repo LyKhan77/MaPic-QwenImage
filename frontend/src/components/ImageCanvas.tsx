@@ -6,6 +6,7 @@ import Loader from './Loader'
 import BearAnimation from './BearAnimation'
 import { toast } from 'sonner'
 import PromptInput from './PromptInput'
+import type { GenerationOptions } from './PromptInput'
 import { useState } from 'react'
 import { useGenerationStatus } from '../hooks/useGenerationStatus'
 
@@ -13,7 +14,7 @@ interface ImageCanvasProps {
   currentGeneration: Generation | null
   isLoading: boolean
   modelStatus: ModelStatus
-  onGenerate: (prompt: string, images?: string[]) => void
+  onGenerate: (prompt: string, images?: string[], options?: GenerationOptions) => void
 }
 
 export default function ImageCanvas({ currentGeneration, isLoading, modelStatus, onGenerate }: ImageCanvasProps) {
