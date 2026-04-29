@@ -7,6 +7,7 @@ import BearAnimation from './BearAnimation'
 import { toast } from 'sonner'
 import PromptInput from './PromptInput'
 import { useState } from 'react'
+import { useGenerationStatus } from '../hooks/useGenerationStatus'
 
 interface ImageCanvasProps {
   currentGeneration: Generation | null
@@ -17,6 +18,7 @@ interface ImageCanvasProps {
 
 export default function ImageCanvas({ currentGeneration, isLoading, modelStatus, onGenerate }: ImageCanvasProps) {
   const [isTyping, setIsTyping] = useState(false)
+  const generationStatus = useGenerationStatus(isLoading)
 
   const handleDownload = async () => {
     if (!currentGeneration?.public_url) return
@@ -83,8 +85,43 @@ export default function ImageCanvas({ currentGeneration, isLoading, modelStatus,
               <div className="relative h-36 w-36">
                 <Loader />
               </div>
-              <p className="font-mono text-sm text-primary animate-pulse mt-8">
-                {modelStatus === 'loading' ? 'Loading pipeline...' : modelStatus === 'offline' ? 'Reconnecting...' : 'Neural networks activating...'}
+              <p className="font-mono text-sm text-primary animate-pulse mt-8 h-5">
+                <AnimatePresence mode="wait">
+                  {modelStatus === 'loading' ? (
+                    <motion.span
+                      key="loading-pipeline"
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.3 }}
+                      className="inline-block"
+                    >
+                      Loading pipeline...
+                    </motion.span>
+                  ) : modelStatus === 'offline' ? (
+                    <motion.span
+                      key="reconnecting"
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.3 }}
+                      className="inline-block"
+                    >
+                      Reconnecting...
+                    </motion.span>
+                  ) : (
+                    <motion.span
+                      key={generationStatus}
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.3 }}
+                      className="inline-block"
+                    >
+                      {generationStatus}
+                    </motion.span>
+                  )}
+                </AnimatePresence>
               </p>
             </motion.div>
           ) : currentGeneration ? (
