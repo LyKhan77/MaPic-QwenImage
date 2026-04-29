@@ -5,11 +5,12 @@ import logging
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 try:
     from backend.config import CORS_ORIGINS, GLM_IMAGE_API_URL
     from backend.schemas import GenerateRequest, Generation
-    from backend.services.glm_image_service import GlmImageError, generate_image_bytes, get_health_status, load_model, unload_model
+    from backend.services.glm_image_service import GlmImageError, generate_image_bytes, get_health_status, load_model, unload_model, stream_load_model
     from backend.services.supabase_service import (
         SupabaseError,
         fetch_history,
@@ -20,7 +21,7 @@ try:
 except ModuleNotFoundError:
     from config import CORS_ORIGINS, GLM_IMAGE_API_URL
     from schemas import GenerateRequest, Generation
-    from services.glm_image_service import GlmImageError, generate_image_bytes, get_health_status, load_model, unload_model
+    from services.glm_image_service import GlmImageError, generate_image_bytes, get_health_status, load_model, unload_model, stream_load_model
     from services.supabase_service import (
         SupabaseError,
         fetch_history,
@@ -48,6 +49,11 @@ async def api_health():
     status = await get_health_status()
     return {"status": status}
 
+
+
+@app.get("/api/load/stream")
+async def api_load_stream():
+    return StreamingResponse(stream_load_model(), media_type="text/event-stream")
 
 @app.post("/api/load")
 async def api_load():

@@ -6,6 +6,9 @@ interface ModelStatusBadgeProps {
   status: ModelStatus
   onLoad?: () => void
   onUnload?: () => void
+  progress?: number
+  message?: string
+  elapsed?: number
 }
 
 const statusConfig: Record<ModelStatus, { label: string; color: string; pulse: boolean }> = {
@@ -15,8 +18,14 @@ const statusConfig: Record<ModelStatus, { label: string; color: string; pulse: b
   unloaded: { label: 'IDLE', color: 'bg-gray-400 shadow-gray-400/50', pulse: false },
 }
 
-export default function ModelStatusBadge({ status, onLoad, onUnload }: ModelStatusBadgeProps) {
+export default function ModelStatusBadge({ status, onLoad, onUnload, progress = 0, message = '', elapsed = 0 }: ModelStatusBadgeProps) {
   const config = statusConfig[status] || statusConfig.offline
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60)
+    const s = Math.floor(seconds % 60)
+    return `${m}:${s.toString().padStart(2, '0')}`
+  }
 
   return (
     <div className="group flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 ring-1 ring-white/10 transition-all hover:bg-white/10">
@@ -48,6 +57,17 @@ export default function ModelStatusBadge({ status, onLoad, onUnload }: ModelStat
         >
           {config.label}
         </motion.span>
+
+        {status === 'loading' && message && (
+          <motion.span
+            initial={{ opacity: 0, width: 0 }}
+            animate={{ opacity: 1, width: 'auto' }}
+            className="ml-1.5 text-[9px] text-amber-400/80 normal-case tracking-normal whitespace-nowrap overflow-hidden flex items-center gap-1"
+          >
+            <span>{message}</span>
+            {elapsed > 0 && <span className="opacity-70 font-mono">({formatTime(elapsed)})</span>}
+          </motion.span>
+        )}
       </AnimatePresence>
 
       {/* Action Buttons */}
@@ -62,6 +82,15 @@ export default function ModelStatusBadge({ status, onLoad, onUnload }: ModelStat
             Unload
           </span>
         </button>
+      )}
+
+      {status === 'loading' && progress > 0 && (
+        <div className="absolute -bottom-[2px] left-3 right-3 h-[2px] bg-white/5 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-amber-400 rounded-full transition-all duration-1000 ease-linear animate-pulse"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
       )}
 
       {status === 'unloaded' && onLoad && (

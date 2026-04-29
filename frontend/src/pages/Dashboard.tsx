@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -16,6 +16,9 @@ interface DashboardProps {
 export default function Dashboard({ session }: DashboardProps) {
   const queryClient = useQueryClient()
   const [currentGen, setCurrentGen] = useState<Generation | null>(null)
+  const [loadProgress, setLoadProgress] = useState(0)
+  const [loadMessage, setLoadMessage] = useState('')
+  const [loadElapsed, setLoadElapsed] = useState(0)
 
   // Poll model health status
   const { data: modelStatus = 'offline' } = useQuery({
@@ -27,6 +30,25 @@ export default function Dashboard({ session }: DashboardProps) {
     },
     refetchIntervalInBackground: false,
   })
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>
+    if (modelStatus === 'loading') {
+      interval = setInterval(() => {
+        setLoadElapsed(prev => prev + 1)
+        setLoadProgress(prev => {
+          if (prev < 90) return prev + 0.3
+          return prev
+        })
+      }, 1000)
+    } else {
+      setLoadElapsed(0)
+      if (modelStatus !== 'ready') {
+        setLoadProgress(0)
+      }
+    }
+    return () => clearInterval(interval)
+  }, [modelStatus])
 
   // Fetch History
   const { data: history = [] } = useQuery({
@@ -79,11 +101,18 @@ export default function Dashboard({ session }: DashboardProps) {
   const handleLoadModel = async () => {
     try {
       queryClient.setQueryData(['model-health'], 'loading')
-      await api.loadModel()
+      setLoadProgress(0)
+      setLoadElapsed(0)
+      setLoadMessage('Connecting...')
+      await api.loadModel((p, m) => {
+        setLoadProgress(prev => Math.max(prev, p))
+        setLoadMessage(m)
+      })
       queryClient.invalidateQueries({ queryKey: ['model-health'] })
     } catch (e) {
       console.error(e)
       queryClient.setQueryData(['model-health'], 'offline')
+      toast.error('Failed to load model')
     }
   }
 
@@ -113,7 +142,7 @@ export default function Dashboard({ session }: DashboardProps) {
       <main className="flex flex-1 flex-col relative min-w-0 min-h-0">
         <div className="flex-1 relative min-h-0 flex flex-col">
            <div className="absolute top-4 right-6 z-50">
-             <ModelStatusBadge status={modelStatus} onLoad={handleLoadModel} onUnload={handleUnloadModel} />
+             <ModelStatusBadge status={modelStatus} onLoad={handleLoadModel} onUnload={handleUnloadModel} progress={loadProgress} message={loadMessage} elapsed={loadElapsed} />
            </div>
            <ImageCanvas
              currentGeneration={currentGen}

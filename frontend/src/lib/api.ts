@@ -14,10 +14,40 @@ export const api = {
     }
   },
 
-  async loadModel() {
-    const res = await fetch(`${API_URL}/load`, { method: 'POST' })
-    if (!res.ok) throw new Error('Failed to load model')
-    return res.json()
+  async loadModel(onProgress?: (progress: number, message: string) => void) {
+    if (!onProgress) {
+      const res = await fetch(`${API_URL}/load`, { method: 'POST' })
+      if (!res.ok) throw new Error('Failed to load model')
+      return res.json()
+    }
+
+    return new Promise((resolve, reject) => {
+      const eventSource = new EventSource(`${API_URL}/load/stream`);
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.error) {
+            eventSource.close();
+            reject(new Error(data.message));
+          } else {
+            onProgress(data.progress, data.message);
+            if (data.progress === 100) {
+              eventSource.close();
+              resolve({ status: 'ready' });
+            }
+          }
+        } catch (e) {
+          eventSource.close();
+          reject(e);
+        }
+      };
+
+      eventSource.onerror = (error) => {
+        eventSource.close();
+        reject(error);
+      };
+    });
   },
 
   async unloadModel() {

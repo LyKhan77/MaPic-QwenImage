@@ -8,9 +8,19 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
+import json
+from fastapi.responses import StreamingResponse
+
 last_request_time = time.time()
 is_unloaded = True
 is_loading = False
+loading_progress = 0
+loading_message = ""
+
+def update_progress(prog: int, msg: str):
+    global loading_progress, loading_message
+    loading_progress = prog
+    loading_message = msg
 
 import torch
 from diffusers import PipelineQuantizationConfig
@@ -85,6 +95,7 @@ def load_model():
     global pipe, is_loading
     if pipe is None:
         is_loading = True
+        update_progress(10, "Initializing loading...")
         logger.info("Loading GLM-Image pipeline across GPUs...")
         _log_gpu_memory("before_load")
 
@@ -102,6 +113,7 @@ def load_model():
                 logger.warning("Failed to create quantization config: %s", exc)
 
             try:
+                update_progress(20, "Loading pipeline weights (this takes a while)...")
                 pipe = GlmImagePipeline.from_pretrained(
                     "zai-org/GLM-Image",
                     torch_dtype=torch.bfloat16,
@@ -113,6 +125,7 @@ def load_model():
                 logger.info("GLM-Image pipeline loaded with 8-bit quantization.")
             except Exception as exc:
                 logger.warning("Quantized load failed (%s). Falling back to standard load...", exc)
+                update_progress(20, "Loading standard weights (this takes a while)...")
                 pipe = GlmImagePipeline.from_pretrained(
                     "zai-org/GLM-Image",
                     torch_dtype=torch.bfloat16,
@@ -123,6 +136,7 @@ def load_model():
                 logger.info("GLM-Image pipeline loaded (standard, no quantization).")
 
             # Offload VAE to CPU to free GPU VRAM for transformer activations
+            update_progress(80, "Model loaded. Offloading VAE to CPU...")
             logger.info("Offloading VAE to CPU...")
             pipe.vae = pipe.vae.to("cpu")
 
@@ -140,6 +154,7 @@ def load_model():
                 logger.warning("VAE tiling not available: %s", exc)
 
             # Enable attention slicing on transformer to reduce activation memory
+            update_progress(90, "Enabling memory optimizations...")
             try:
                 if hasattr(pipe, "transformer") and hasattr(pipe.transformer, "enable_attention_slicing"):
                     pipe.transformer.enable_attention_slicing("auto")
@@ -157,8 +172,12 @@ def load_model():
 
             global is_unloaded
             is_unloaded = False
+            update_progress(100, "Ready.")
             _log_gpu_memory("after_load")
             logger.info("GLM-Image pipeline ready (multi-GPU, VAE on CPU).")
+        except Exception as exc:
+            update_progress(0, f"Error: {exc}")
+            raise
         finally:
             is_loading = False
 
@@ -231,6 +250,40 @@ async def health():
         return {"status": "ready"}
     return {"status": "loading"}
 
+
+
+@app.get("/v1/system/load/stream")
+async def api_load_model_stream():
+    global is_unloaded, last_request_time
+    last_request_time = time.time()
+    
+    if is_unloaded or pipe is None:
+        if not is_loading:
+            asyncio.get_event_loop().run_in_executor(_executor, load_model)
+            
+    async def event_generator():
+        last_prog = -1
+        last_msg = ""
+        while True:
+            if loading_progress != last_prog or loading_message != last_msg:
+                last_prog = loading_progress
+                last_msg = loading_message
+                yield f"data: {json.dumps({'progress': last_prog, 'message': last_msg})}\n\n"
+            else:
+                # Send SSE comment as keep-alive ping
+                yield ": ping\n\n"
+                
+            if not is_loading:
+                if pipe is not None and last_prog != 100:
+                    yield f"data: {json.dumps({'progress': 100, 'message': 'Ready.'})}\n\n"
+                elif pipe is None:
+                    # Error or unloading during load
+                    yield f"data: {json.dumps({'progress': 0, 'message': loading_message or 'Failed to load model', 'error': True})}\n\n"
+                break
+                
+            await asyncio.sleep(0.5)
+            
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.post("/v1/system/load")
 async def api_load_model():
