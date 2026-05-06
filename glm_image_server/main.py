@@ -24,7 +24,6 @@ def update_progress(prog: int, msg: str):
     loading_message = msg
 
 import torch
-from diffusers import PipelineQuantizationConfig
 from diffusers.pipelines.glm_image import GlmImagePipeline
 from fastapi import FastAPI
 from PIL import Image
@@ -125,34 +124,16 @@ def load_model():
         _log_gpu_memory("before_load")
 
         try:
-            update_progress(15, "Loading pipeline weights (8-bit, 3-GPU)...")
-            logger.info("Loading GLM-Image pipeline (8-bit quantized, 3-GPU)...")
-
-            # 8-bit quantization for transformer + AR encoder — halves weight memory (~32 GB -> ~16 GB)
-            # Full bf16 (~32 GB weights) doesn't fit with balanced split across 2x 16 GB GPUs
-            quantization_config = PipelineQuantizationConfig(
-                quant_backend="bitsandbytes_8bit",
-                quant_kwargs={"load_in_8bit": True},
-                components_to_quantize=["transformer", "vision_language_encoder"],
-            )
+            update_progress(15, "Loading pipeline weights (BF16, Auto-Map)...")
+            logger.info("Loading GLM-Image pipeline (BF16, device_map=auto)...")
 
             pipe = GlmImagePipeline.from_pretrained(
                 "zai-org/GLM-Image",
                 torch_dtype=torch.bfloat16,
-                device_map="balanced",
+                device_map="auto",
                 max_memory=MAX_MEMORY,
-                quantization_config=quantization_config,
             )
-            logger.info("GLM-Image pipeline loaded (8-bit, device_map=balanced, 3-GPU).")
-
-            # Move VAE to GPU 2 (RTX 4090, 24 GB) — runs natively on GPU, no CPU roundtrips
-            # Must detach accelerate hooks before moving, then re-register on new device
-            update_progress(70, "Placing VAE on GPU 2 (RTX 4090)...")
-            logger.info("Placing VAE on GPU 2 (cuda:2)...")
-            if hasattr(pipe.vae, "_hf_hook"):
-                from accelerate.hooks import remove_hook_from_module
-                remove_hook_from_module(pipe.vae, recurse=True)
-            pipe.vae = pipe.vae.to("cuda:2")
+            logger.info("GLM-Image pipeline loaded (BF16, device_map=auto).")
 
             # Enable VAE slicing & tiling to reduce peak memory during encode/decode
             try:
@@ -209,7 +190,7 @@ def load_model():
             _log_device_map()
             _log_gpu_memory("after_load")
             update_progress(100, "Ready.")
-            logger.info("GLM-Image pipeline ready (3-GPU, 8-bit, VAE on GPU 2).")
+            logger.info("GLM-Image pipeline ready (BF16, device_map=auto).")
         except Exception as exc:
             update_progress(0, f"Error: {exc}")
             raise
