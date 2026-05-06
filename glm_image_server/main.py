@@ -34,15 +34,14 @@ pipe: GlmImagePipeline | None = None
 _executor = ThreadPoolExecutor(max_workers=1)
 _inference_lock = asyncio.Lock()
 
-# GPU indices from nvidia-smi (2026-05-06):
-#   GPU 0 = RTX 5080 (16 GB, Blackwell)
+# GPU indices as seen by PyTorch (verified 2026-05-06):
+#   GPU 0 = RTX 4090 (24 GB, Ada Lovelace)
 #   GPU 1 = RTX 5080 (16 GB, Blackwell)
-#   GPU 2 = RTX 4090 (24 GB, Ada Lovelace)
+#   GPU 2 = RTX 5080 (16 GB, Blackwell)
 MAX_MEMORY = {
-    2: "22GiB",    # RTX 4090 (Primary carrier)
-    0: "14GiB",    # RTX 5080
+    0: "22GiB",    # RTX 4090
     1: "14GiB",    # RTX 5080
-    "cpu": "4GiB", # overflow safety net
+    2: "14GiB",    # RTX 5080
 }
 
 
@@ -124,16 +123,26 @@ def load_model():
         _log_gpu_memory("before_load")
 
         try:
-            update_progress(15, "Loading pipeline weights (BF16, Auto-Map)...")
-            logger.info("Loading GLM-Image pipeline (BF16, device_map=auto)...")
+            update_progress(15, "Loading pipeline weights (BF16, Custom-Map)...")
+            logger.info("Loading GLM-Image pipeline (BF16, custom device_map)...")
+
+            # Custom device_map to fix multi-GPU I2I issues:
+            # Pin VAE, text_encoder, and vision_language_encoder to GPU 0 (the 4090)
+            # This ensures encoding/decoding happens on one device, while transformer shards.
+            custom_map = {
+                "vae": 0,
+                "text_encoder": 0,
+                "vision_language_encoder": 0,
+                "transformer": "auto",
+            }
 
             pipe = GlmImagePipeline.from_pretrained(
                 "zai-org/GLM-Image",
                 torch_dtype=torch.bfloat16,
-                device_map="auto",
+                device_map=custom_map,
                 max_memory=MAX_MEMORY,
             )
-            logger.info("GLM-Image pipeline loaded (BF16, device_map=auto).")
+            logger.info("GLM-Image pipeline loaded (BF16, custom device_map).")
 
             # Enable VAE slicing & tiling to reduce peak memory during encode/decode
             try:
@@ -169,14 +178,15 @@ def load_model():
                 logger.info("Memory-efficient SDP enabled.")
 
             # torch.compile the transformer for faster diffusion denoising
-            update_progress(85, "Compiling transformer...")
-            try:
-                torch.set_float32_matmul_precision("high")
-                pipe.transformer.to(memory_format=torch.channels_last)
-                pipe.transformer = torch.compile(pipe.transformer, mode="reduce-overhead")
-                logger.info("Transformer compiled (reduce-overhead mode).")
-            except Exception as exc:
-                logger.warning("torch.compile not available or failed: %s", exc)
+            # Disabled to save VRAM for activations in BF16 mode
+            # update_progress(85, "Compiling transformer...")
+            # try:
+            #     torch.set_float32_matmul_precision("high")
+            #     pipe.transformer.to(memory_format=torch.channels_last)
+            #     pipe.transformer = torch.compile(pipe.transformer, mode="reduce-overhead")
+            #     logger.info("Transformer compiled (reduce-overhead mode).")
+            # except Exception as exc:
+            #     logger.warning("torch.compile not available or failed: %s", exc)
 
             global is_unloaded
             is_unloaded = False
@@ -190,7 +200,7 @@ def load_model():
             _log_device_map()
             _log_gpu_memory("after_load")
             update_progress(100, "Ready.")
-            logger.info("GLM-Image pipeline ready (BF16, device_map=auto).")
+            logger.info("GLM-Image pipeline ready (BF16, device_map=balanced).")
         except Exception as exc:
             update_progress(0, f"Error: {exc}")
             raise
