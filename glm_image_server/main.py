@@ -40,9 +40,9 @@ _inference_lock = asyncio.Lock()
 #   GPU 1 = RTX 5080 (16 GB, Blackwell)
 #   GPU 2 = RTX 4090 (24 GB, Ada Lovelace)
 MAX_MEMORY = {
-    0: "15GiB",    # RTX 5080
-    1: "15GiB",    # RTX 5080
-    2: "23GiB",    # RTX 4090
+    2: "22GiB",    # RTX 4090 (Primary carrier)
+    0: "14GiB",    # RTX 5080
+    1: "14GiB",    # RTX 5080
     "cpu": "4GiB", # overflow safety net
 }
 
