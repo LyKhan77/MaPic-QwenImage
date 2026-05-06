@@ -26,7 +26,7 @@ MaPic Backend (FastAPI :8181)
     ↓
 GLM-Image Server (FastAPI :30000)
     ↓
-diffusers GlmImagePipeline (CPU offload, ~23GB VRAM)
+diffusers GlmImagePipeline (3-GPU bf16, 56 GB VRAM)
 ```
 
 ## 🛠️ Tech Stack
@@ -54,7 +54,7 @@ diffusers GlmImagePipeline (CPU offload, ~23GB VRAM)
 ### Prerequisites
 *   Node.js & npm
 *   Python 3.10+
-*   CUDA-capable GPU (~23GB+ VRAM with CPU offload)
+*   CUDA-capable GPUs: 3x NVIDIA GPUs totaling ~56 GB VRAM (2x RTX 5080 16 GB + RTX 4090 24 GB)
 *   Supabase Account (Project URL & Service Role Key)
 
 ### 1. Clone the Repository
