@@ -126,14 +126,13 @@ def load_model():
             update_progress(15, "Loading pipeline weights (BF16, Custom-Map)...")
             logger.info("Loading GLM-Image pipeline (BF16, custom device_map)...")
 
-            # Custom device_map to fix multi-GPU I2I issues:
-            # Pin VAE, text_encoder, and vision_language_encoder to GPU 0 (the 4090)
-            # This ensures encoding/decoding happens on one device, while transformer shards.
+            # Custom device_map to prevent CPU offload and optimize speed:
+            # Pin sequential AR components and VAE to the fastest card (4090)
             custom_map = {
-                "vae": 0,
                 "text_encoder": 0,
                 "vision_language_encoder": 0,
-                "transformer": "auto",
+                "vae": 0,
+                "transformer": "balanced", # Accelerate will shard this across remaining MAX_MEMORY
             }
 
             pipe = GlmImagePipeline.from_pretrained(
