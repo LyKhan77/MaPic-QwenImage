@@ -18,7 +18,7 @@ project references :
 - **Multi-reference support:** Up to 3 reference images for I2I generation
 - **Hardware:** RTX 5080 (16GB) + RTX 5080 (16GB) + RTX 4090 (24GB) — triple GPU via `device_map="balanced"`
 - **Memory:** `MAX_MEMORY={0: "15GiB", 1: "15GiB", 2: "23GiB", "cpu": "4GiB"}` — balanced for heterogeneous GPUs
-- **No Quantization:** Full `torch.bfloat16` — 56 GB total VRAM is sufficient for bf16 weights (~32 GB) + activations
+- **8-bit Quantization:** `bitsandbytes` INT8 for transformer + vision_language_encoder — halves weight memory (~32 GB -> ~16 GB), needed because balanced split puts most weight on 2x 16 GB GPUs
 - **VAE on GPU 2:** VAE placed on RTX 4090 (cuda:2) for native GPU encode/decode — no CPU roundtrips
 - **AR sampling:** `temperature=0.9`, `top_p=0.75`, `do_sample=True` — set on `vision_language_encoder.generation_config` after model load
 - **Configurable generation params:** `num_inference_steps` (20-75, default 50 T2I / 35 I2I), `guidance_scale` (1.0-5.0, default 1.5) — exposed via frontend UI sliders

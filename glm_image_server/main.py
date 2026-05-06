@@ -24,6 +24,7 @@ def update_progress(prog: int, msg: str):
     loading_message = msg
 
 import torch
+from diffusers import PipelineQuantizationConfig
 from diffusers.pipelines.glm_image import GlmImagePipeline
 from fastapi import FastAPI
 from PIL import Image
@@ -34,11 +35,15 @@ pipe: GlmImagePipeline | None = None
 _executor = ThreadPoolExecutor(max_workers=1)
 _inference_lock = asyncio.Lock()
 
+# GPU indices from nvidia-smi (2026-05-06):
+#   GPU 0 = RTX 5080 (16 GB, Blackwell)
+#   GPU 1 = RTX 5080 (16 GB, Blackwell)
+#   GPU 2 = RTX 4090 (24 GB, Ada Lovelace)
 MAX_MEMORY = {
-    0: "15GiB",    # RTX 5080 (16 GB)
-    1: "15GiB",    # RTX 5080 (16 GB)
-    2: "23GiB",    # RTX 4090 (24 GB)
-    "cpu": "4GiB", # minimal overflow safety net
+    0: "15GiB",    # RTX 5080
+    1: "15GiB",    # RTX 5080
+    2: "23GiB",    # RTX 4090
+    "cpu": "4GiB", # overflow safety net
 }
 
 
@@ -114,16 +119,25 @@ def load_model():
         _log_gpu_memory("before_load")
 
         try:
-            update_progress(15, "Loading pipeline weights (bf16, 3-GPU)...")
-            logger.info("Loading GLM-Image pipeline (bf16, no quantization, 3-GPU)...")
+            update_progress(15, "Loading pipeline weights (8-bit, 3-GPU)...")
+            logger.info("Loading GLM-Image pipeline (8-bit quantized, 3-GPU)...")
+
+            # 8-bit quantization for transformer + AR encoder — halves weight memory (~32 GB -> ~16 GB)
+            # Full bf16 (~32 GB weights) doesn't fit with balanced split across 2x 16 GB GPUs
+            quantization_config = PipelineQuantizationConfig(
+                quant_backend="bitsandbytes_8bit",
+                quant_kwargs={"load_in_8bit": True},
+                components_to_quantize=["transformer", "vision_language_encoder"],
+            )
 
             pipe = GlmImagePipeline.from_pretrained(
                 "zai-org/GLM-Image",
                 torch_dtype=torch.bfloat16,
                 device_map="balanced",
                 max_memory=MAX_MEMORY,
+                quantization_config=quantization_config,
             )
-            logger.info("GLM-Image pipeline loaded (bf16, device_map=balanced).")
+            logger.info("GLM-Image pipeline loaded (8-bit, device_map=balanced, 3-GPU).")
 
             # Move VAE to GPU 2 (RTX 4090, 24 GB) — runs natively on GPU, no CPU roundtrips
             update_progress(70, "Placing VAE on GPU 2 (RTX 4090)...")
@@ -185,7 +199,7 @@ def load_model():
             _log_device_map()
             _log_gpu_memory("after_load")
             update_progress(100, "Ready.")
-            logger.info("GLM-Image pipeline ready (3-GPU, bf16, VAE on GPU 2).")
+            logger.info("GLM-Image pipeline ready (3-GPU, 8-bit, VAE on GPU 2).")
         except Exception as exc:
             update_progress(0, f"Error: {exc}")
             raise
