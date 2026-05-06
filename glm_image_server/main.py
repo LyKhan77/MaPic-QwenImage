@@ -85,13 +85,19 @@ def _log_device_map():
     if pipe is None:
         return
     seen = {}
-    for name, param in pipe.named_parameters():
-        dev = str(param.device)
-        seen[dev] = seen.get(dev, 0) + param.numel()
-    logger.info("Device map (parameter distribution):")
-    for dev in sorted(seen):
-        cnt = seen[dev]
-        logger.info("  %s: %.2fB params (%.2f GB in bf16)", dev, cnt / 1e9, cnt * 2 / 1e9)
+    for module_name in pipe.config.keys():
+        module = getattr(pipe, module_name, None)
+        if module is None:
+            continue
+        if hasattr(module, "parameters"):
+            for param in module.parameters():
+                dev = str(param.device)
+                seen[dev] = seen.get(dev, 0) + param.numel()
+    if seen:
+        logger.info("Device map (parameter distribution):")
+        for dev in sorted(seen):
+            cnt = seen[dev]
+            logger.info("  %s: %.2fB params (%.2f GB in bf16)", dev, cnt / 1e9, cnt * 2 / 1e9)
 
 
 def _log_gpu_memory(label: str = ""):
@@ -140,8 +146,12 @@ def load_model():
             logger.info("GLM-Image pipeline loaded (8-bit, device_map=balanced, 3-GPU).")
 
             # Move VAE to GPU 2 (RTX 4090, 24 GB) — runs natively on GPU, no CPU roundtrips
+            # Must detach accelerate hooks before moving, then re-register on new device
             update_progress(70, "Placing VAE on GPU 2 (RTX 4090)...")
             logger.info("Placing VAE on GPU 2 (cuda:2)...")
+            if hasattr(pipe.vae, "_hf_hook"):
+                from accelerate.hooks import remove_hook_from_module
+                remove_hook_from_module(pipe.vae, recurse=True)
             pipe.vae = pipe.vae.to("cuda:2")
 
             # Enable VAE slicing & tiling to reduce peak memory during encode/decode
