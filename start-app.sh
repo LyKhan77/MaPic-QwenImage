@@ -16,7 +16,7 @@ trap cleanup SIGINT SIGTERM
 echo "Starting MaPic..."
 
 # PyTorch memory optimization: reduce fragmentation that leads to OOM
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
 
 # Start GLM-Image Server
 echo "Starting GLM-Image Server on port 30000..."

@@ -10,27 +10,29 @@ project references :
 
 # Current State - Update this Section for every CHANGES and UPDATES
 
-## Architecture: GLM-Image Multi-GPU (2026-04-29)
+## Architecture: GLM-Image Multi-GPU (2026-05-06)
 
 - **Single model:** GLM-Image (9B AR + 7B diffusion decoder, local diffusers pipeline)
 - **3-service stack:** Frontend (:5151) → Backend (:8181) → GLM-Image Server (:30000)
 - **Removed:** Ollama service, Z.ai cloud service, model selector UI, idle timeout/monitor
 - **Multi-reference support:** Up to 3 reference images for I2I generation
-- **Hardware:** RTX 4090 (24GB) + RTX 5080 (16GB) — dual GPU via `device_map="balanced"`
-- **Memory:** `MAX_MEMORY={0: "23GiB", 1: "13GiB"}` — asymmetric allocation, leaves ~3 GB headroom on GPU 1 for peak activations
-- **8-bit Quantization:** `bitsandbytes` INT8 for transformer + vision_language_encoder — halves weight memory (~32 GB → ~16 GB)
+- **Hardware:** RTX 5080 (16GB) + RTX 5080 (16GB) + RTX 4090 (24GB) — triple GPU via `device_map="auto"`
+- **Memory:** `MAX_MEMORY={0: "15GiB", 1: "15GiB", 2: "23GiB", "cpu": "4GiB"}` — balanced for heterogeneous GPUs
+- **No Quantization:** Full `torch.bfloat16` — 56 GB total VRAM is sufficient for bf16 weights (~32 GB) + activations
+- **VAE on GPU 2:** VAE placed on RTX 4090 (cuda:2) for native GPU encode/decode — no CPU roundtrips
 - **AR sampling:** `temperature=0.9`, `top_p=0.75`, `do_sample=True` — set on `vision_language_encoder.generation_config` after model load
 - **Configurable generation params:** `num_inference_steps` (20-75, default 50 T2I / 35 I2I), `guidance_scale` (1.0-5.0, default 1.5) — exposed via frontend UI sliders
-- **VAE offload:** VAE moved to CPU after load to free GPU VRAM for transformer activations
-- **Optimizations:** VAE slicing + tiling, attention slicing (transformer), Flash SDP, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
-- **Est. VRAM peak:** GPU 0: 15–19 GB | GPU 1: 9–13 GB | I2I with 3 refs: stable, minimal OOM risk
-- **Inference server:** `glm_image_server/main.py` — thread pool executor, inference lock, no idle unload, fallback to standard load if quantization fails
+- **torch.compile:** Transformer compiled with `reduce-overhead` mode for ~2-4x diffusion speedup
+- **Optimizations:** VAE slicing + tiling, attention slicing (transformer), Flash SDP + mem-efficient SDP, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128`
+- **Pre-flight checks:** Blackwell (sm_120) architecture validation, PCIe topology logging, per-GPU parameter distribution logging
+- **Est. VRAM peak:** GPU 0: 9–12 GB | GPU 1: 9–12 GB | GPU 2: 14–20 GB | Supports up to 2048x2048
+- **Inference server:** `glm_image_server/main.py` — thread pool executor, inference lock, no idle unload
 - **Concurrency:** asyncio.Lock ensures 1 inference at a time; `run_in_executor` keeps event loop responsive
 
 ### Key Files
 | File | Role |
 |------|------|
-| `glm_image_server/main.py` | Inference server (T2I + I2I, thread pool, VAE device patch, 8-bit quantization, memory optimization) |
+| `glm_image_server/main.py` | Inference server (T2I + I2I, thread pool, 3-GPU bf16, torch.compile, VAE on GPU 2) |
 | `backend/services/glm_image_service.py` | Backend service layer (retry logic, 4hr timeout) |
 | `backend/config.py` | `GLM_IMAGE_API_URL` (default localhost:30000) |
 | `start-app.sh` | Starts all 3 services (exports `PYTORCH_CUDA_ALLOC_CONF`) |
@@ -99,7 +101,7 @@ MaPic/
 1. **User** → Frontend (`:5151`) submits prompt (+ optional reference images)
 2. **Frontend** → Backend (`:8181`) `POST /api/generate` with prompt + base64 images
 3. **Backend** → GLM-Image Server (`:30000`) `POST /v1/images/generations` or `/v1/images/edits`
-4. **GLM-Image Server** runs `GlmImagePipeline` inference (multi-GPU, 8-bit quantized, VAE on CPU)
+4. **GLM-Image Server** runs `GlmImagePipeline` inference (3-GPU, bf16, torch.compile, VAE on GPU 2)
 5. **Backend** receives base64 image → uploads to Supabase Storage → inserts record to PostgreSQL → returns Generation to Frontend
 6. **Frontend** displays image and updates history sidebar
 

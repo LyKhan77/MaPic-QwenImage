@@ -4,6 +4,7 @@ import gc
 import io
 import logging
 import math
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -23,7 +24,6 @@ def update_progress(prog: int, msg: str):
     loading_message = msg
 
 import torch
-from diffusers import PipelineQuantizationConfig
 from diffusers.pipelines.glm_image import GlmImagePipeline
 from fastapi import FastAPI
 from PIL import Image
@@ -35,45 +35,58 @@ _executor = ThreadPoolExecutor(max_workers=1)
 _inference_lock = asyncio.Lock()
 
 MAX_MEMORY = {
-    0: "23GiB",  # RTX 4090 (24 GB) — asymmetric allocation for headroom
-    1: "13GiB",  # RTX 5080 (16 GB) — leave ~3 GB for peak activations
+    0: "15GiB",    # RTX 5080 (16 GB)
+    1: "15GiB",    # RTX 5080 (16 GB)
+    2: "23GiB",    # RTX 4090 (24 GB)
+    "cpu": "4GiB", # minimal overflow safety net
 }
 
 
-def _patch_vae_device():
-    """Fix CUDA/CPU mismatch when device_map offloads VAE to CPU."""
+def _preflight_check():
+    """Verify PyTorch supports all GPU architectures in the system."""
+    arch_list = torch.cuda.get_arch_list()
+    num_gpus = torch.cuda.device_count()
+    logger.info("PyTorch %s | CUDA %s | %d GPU(s)", torch.__version__, torch.version.cuda, num_gpus)
+    logger.info("Compiled archs: %s", arch_list)
+
+    for i in range(num_gpus):
+        props = torch.cuda.get_device_properties(i)
+        logger.info("GPU %d: %s | %.0f MB | SM %d.%d",
+                     i, props.name, props.total_memory / 1024**2,
+                     props.major, props.minor)
+
+    # RTX 5080 = Blackwell (sm_120) — needs PyTorch >= 2.6
+    if num_gpus >= 2 and "sm_120" not in arch_list:
+        logger.warning(
+            "RTX 5080 detected but sm_120 not in compiled archs. "
+            "Upgrade PyTorch to >= 2.6 with CUDA 12.8 for native Blackwell support."
+        )
+
+
+def _log_gpu_topology():
+    """Log PCIe topology for debugging inter-GPU bandwidth."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "topo", "-m"], capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            logger.info("GPU Topology:\n%s", result.stdout.strip())
+    except Exception as exc:
+        logger.warning("Could not query GPU topology: %s", exc)
+
+
+def _log_device_map():
+    """Log per-GPU parameter distribution after model load."""
     if pipe is None:
         return
-
-    original_encode = pipe.vae.encode
-    original_decode = pipe.vae.decode
-
-    def patched_encode(x):
-        vae_device = next(pipe.vae.parameters()).device
-        orig_device = x.device
-        x = x.to(device=vae_device)
-        result = original_encode(x)
-        if hasattr(result, "latent_dist") and hasattr(result.latent_dist, "parameters"):
-            for attr in ["parameters", "mean", "logvar", "std", "var"]:
-                if hasattr(result.latent_dist, attr):
-                    val = getattr(result.latent_dist, attr)
-                    if isinstance(val, torch.Tensor):
-                        setattr(result.latent_dist, attr, val.to(orig_device))
-        elif hasattr(result, "latents"):
-            result.latents = result.latents.to(orig_device)
-        return result
-
-    def patched_decode(z, *args, **kwargs):
-        vae_device = next(pipe.vae.parameters()).device
-        orig_device = z.device
-        z = z.to(device=vae_device)
-        result = original_decode(z, *args, **kwargs)
-        if isinstance(result, tuple):
-            result = tuple(t.to(orig_device) if hasattr(t, "to") else t for t in result)
-        return result
-
-    pipe.vae.encode = patched_encode
-    pipe.vae.decode = patched_decode
+    seen = {}
+    for name, param in pipe.named_parameters():
+        dev = str(param.device)
+        seen[dev] = seen.get(dev, 0) + param.numel()
+    logger.info("Device map (parameter distribution):")
+    for dev in sorted(seen):
+        cnt = seen[dev]
+        logger.info("  %s: %.2fB params (%.2f GB in bf16)", dev, cnt / 1e9, cnt * 2 / 1e9)
 
 
 def _log_gpu_memory(label: str = ""):
@@ -95,50 +108,27 @@ def load_model():
     global pipe, is_loading
     if pipe is None:
         is_loading = True
-        update_progress(10, "Initializing loading...")
-        logger.info("Loading GLM-Image pipeline across GPUs...")
+        update_progress(5, "Pre-flight checks...")
+        _preflight_check()
+        _log_gpu_topology()
         _log_gpu_memory("before_load")
 
         try:
-            # 8-bit quantization to halve model weight memory (~32 GB -> ~16 GB)
-            quantization_config = None
-            try:
-                quantization_config = PipelineQuantizationConfig(
-                    quant_backend="bitsandbytes_8bit",
-                    quant_kwargs={"load_in_8bit": True},
-                    components_to_quantize=["transformer", "vision_language_encoder"],
-                )
-                logger.info("8-bit quantization config created.")
-            except Exception as exc:
-                logger.warning("Failed to create quantization config: %s", exc)
+            update_progress(15, "Loading pipeline weights (bf16, 3-GPU)...")
+            logger.info("Loading GLM-Image pipeline (bf16, no quantization, 3-GPU)...")
 
-            try:
-                update_progress(20, "Loading pipeline weights (this takes a while)...")
-                pipe = GlmImagePipeline.from_pretrained(
-                    "zai-org/GLM-Image",
-                    torch_dtype=torch.bfloat16,
-                    device_map="balanced",
-                    max_memory=MAX_MEMORY,
-                    quantization_config=quantization_config,
-                )
-                _patch_vae_device()
-                logger.info("GLM-Image pipeline loaded with 8-bit quantization.")
-            except Exception as exc:
-                logger.warning("Quantized load failed (%s). Falling back to standard load...", exc)
-                update_progress(20, "Loading standard weights (this takes a while)...")
-                pipe = GlmImagePipeline.from_pretrained(
-                    "zai-org/GLM-Image",
-                    torch_dtype=torch.bfloat16,
-                    device_map="balanced",
-                    max_memory=MAX_MEMORY,
-                )
-                _patch_vae_device()
-                logger.info("GLM-Image pipeline loaded (standard, no quantization).")
+            pipe = GlmImagePipeline.from_pretrained(
+                "zai-org/GLM-Image",
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+                max_memory=MAX_MEMORY,
+            )
+            logger.info("GLM-Image pipeline loaded (bf16, device_map=auto).")
 
-            # Offload VAE to CPU to free GPU VRAM for transformer activations
-            update_progress(80, "Model loaded. Offloading VAE to CPU...")
-            logger.info("Offloading VAE to CPU...")
-            pipe.vae = pipe.vae.to("cpu")
+            # Move VAE to GPU 2 (RTX 4090, 24 GB) — runs natively on GPU, no CPU roundtrips
+            update_progress(70, "Placing VAE on GPU 2 (RTX 4090)...")
+            logger.info("Placing VAE on GPU 2 (cuda:2)...")
+            pipe.vae = pipe.vae.to("cuda:2")
 
             # Enable VAE slicing & tiling to reduce peak memory during encode/decode
             try:
@@ -154,7 +144,7 @@ def load_model():
                 logger.warning("VAE tiling not available: %s", exc)
 
             # Enable attention slicing on transformer to reduce activation memory
-            update_progress(90, "Enabling memory optimizations...")
+            update_progress(80, "Enabling memory optimizations...")
             try:
                 if hasattr(pipe, "transformer") and hasattr(pipe.transformer, "enable_attention_slicing"):
                     pipe.transformer.enable_attention_slicing("auto")
@@ -165,23 +155,37 @@ def load_model():
             except Exception as exc:
                 logger.warning("Attention slicing not available: %s", exc)
 
-            # Enable Flash SDP for memory-efficient attention (PyTorch 2.0+)
+            # Enable Flash SDP + memory-efficient SDP for attention
             if hasattr(torch.backends.cuda, "enable_flash_sdp"):
                 torch.backends.cuda.enable_flash_sdp(True)
                 logger.info("Flash SDP enabled.")
+            if hasattr(torch.backends.cuda, "enable_mem_efficient_sdp"):
+                torch.backends.cuda.enable_mem_efficient_sdp(True)
+                logger.info("Memory-efficient SDP enabled.")
+
+            # torch.compile the transformer for faster diffusion denoising
+            update_progress(85, "Compiling transformer...")
+            try:
+                torch.set_float32_matmul_precision("high")
+                pipe.transformer.to(memory_format=torch.channels_last)
+                pipe.transformer = torch.compile(pipe.transformer, mode="reduce-overhead")
+                logger.info("Transformer compiled (reduce-overhead mode).")
+            except Exception as exc:
+                logger.warning("torch.compile not available or failed: %s", exc)
 
             global is_unloaded
             is_unloaded = False
-            update_progress(100, "Ready.")
+            update_progress(95, "Finalizing...")
             # Set AR sampling params to model-recommended defaults
-            # (pipeline hardcodes do_sample=True without passing temperature/top_p)
             pipe.vision_language_encoder.generation_config.temperature = 0.9
             pipe.vision_language_encoder.generation_config.top_p = 0.75
             pipe.vision_language_encoder.generation_config.do_sample = True
             logger.info("AR sampling config: temperature=0.9, top_p=0.75, do_sample=True")
 
+            _log_device_map()
             _log_gpu_memory("after_load")
-            logger.info("GLM-Image pipeline ready (multi-GPU, VAE on CPU).")
+            update_progress(100, "Ready.")
+            logger.info("GLM-Image pipeline ready (3-GPU, bf16, VAE on GPU 2).")
         except Exception as exc:
             update_progress(0, f"Error: {exc}")
             raise
