@@ -55,6 +55,7 @@ export default function Dashboard({ session }: DashboardProps) {
   const { data: history = [] } = useQuery({
     queryKey: ['history', session.user.id],
     queryFn: () => api.getHistory(session.user.id),
+    select: (data) => data.filter((item: Generation) => item.image_path?.endsWith('.png') || item.public_url?.endsWith('.png'))
   })
 
   // Generate Mutation

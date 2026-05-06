@@ -110,13 +110,15 @@ MaPic/
 
 This section contains critical agent behavior guidelines. Any changes require explicit user approval.
 
-## Important Notes
+## Important Notes - Project RULES
 
 - Always use relevant skills to help with tasks.
 - Always ask the user if there are any plans or discussions that need to be validated.
 - Always provide a summary after finishing a task.
 - Always update `README.md` whenever there are changes to key features and the app's workflow.
 - Commit every function change so you can roll back and view the code history in case of a malfunction or a failed change.
+- Do not re-read files that have already been read in this session unless necessary.
+- Minimize non-essential tool calls.
 
 ===========================
 
