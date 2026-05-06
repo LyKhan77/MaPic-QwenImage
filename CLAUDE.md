@@ -16,7 +16,7 @@ project references :
 - **3-service stack:** Frontend (:5151) → Backend (:8181) → GLM-Image Server (:30000)
 - **Removed:** Ollama service, Z.ai cloud service, model selector UI, idle timeout/monitor
 - **Multi-reference support:** Up to 3 reference images for I2I generation
-- **Hardware:** RTX 5080 (16GB) + RTX 5080 (16GB) + RTX 4090 (24GB) — triple GPU via `device_map="auto"`
+- **Hardware:** RTX 5080 (16GB) + RTX 5080 (16GB) + RTX 4090 (24GB) — triple GPU via `device_map="balanced"`
 - **Memory:** `MAX_MEMORY={0: "15GiB", 1: "15GiB", 2: "23GiB", "cpu": "4GiB"}` — balanced for heterogeneous GPUs
 - **No Quantization:** Full `torch.bfloat16` — 56 GB total VRAM is sufficient for bf16 weights (~32 GB) + activations
 - **VAE on GPU 2:** VAE placed on RTX 4090 (cuda:2) for native GPU encode/decode — no CPU roundtrips

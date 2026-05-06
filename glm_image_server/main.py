@@ -120,10 +120,10 @@ def load_model():
             pipe = GlmImagePipeline.from_pretrained(
                 "zai-org/GLM-Image",
                 torch_dtype=torch.bfloat16,
-                device_map="auto",
+                device_map="balanced",
                 max_memory=MAX_MEMORY,
             )
-            logger.info("GLM-Image pipeline loaded (bf16, device_map=auto).")
+            logger.info("GLM-Image pipeline loaded (bf16, device_map=balanced).")
 
             # Move VAE to GPU 2 (RTX 4090, 24 GB) — runs natively on GPU, no CPU roundtrips
             update_progress(70, "Placing VAE on GPU 2 (RTX 4090)...")
