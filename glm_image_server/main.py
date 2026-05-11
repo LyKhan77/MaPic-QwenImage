@@ -40,8 +40,8 @@ _inference_lock = asyncio.Lock()
 #   GPU 2 = RTX 5080 (16 GB, Blackwell)
 MAX_MEMORY = {
     0: "22GiB",    # RTX 4090
-    1: "15GiB",    # RTX 5080
-    2: "15GiB",    # RTX 5080
+    1: "13GiB",    # RTX 5080 (Leaving ~3GB for I2I activations)
+    2: "13GiB",    # RTX 5080 (Leaving ~3GB for I2I activations)
     "cpu": "4GiB", # Safety net to prevent "meta" device hangs
 }
 
@@ -124,17 +124,21 @@ def load_model():
         _log_gpu_memory("before_load")
 
         try:
-            update_progress(15, "Loading pipeline weights (BF16, balanced)...")
-            logger.info("Loading GLM-Image pipeline (BF16, device_map=balanced)...")
+            update_progress(15, "Loading pipeline weights (8-bit, balanced)...")
+            logger.info("Loading GLM-Image pipeline (8-bit, device_map=balanced)...")
+
+            from transformers import BitsAndBytesConfig
+            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
 
             # Load with balanced map first to handle the massive transformer weights
             pipe = GlmImagePipeline.from_pretrained(
                 "zai-org/GLM-Image",
                 torch_dtype=torch.bfloat16,
+                quantization_config=quantization_config,
                 device_map="balanced",
                 max_memory=MAX_MEMORY,
             )
-            logger.info("GLM-Image pipeline loaded (BF16, device_map=balanced).")
+            logger.info("GLM-Image pipeline loaded (8-bit, device_map=balanced).")
 
             # Enable VAE slicing & tiling to reduce peak memory during encode/decode
             try:

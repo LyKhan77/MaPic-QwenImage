@@ -17,15 +17,16 @@ project references :
 - **Removed:** Ollama service, Z.ai cloud service, model selector UI, idle timeout/monitor
 - **Multi-reference support:** Up to 3 reference images for I2I generation
 - **Hardware:** RTX 5080 (16GB) + RTX 5080 (16GB) + RTX 4090 (24GB) — triple GPU
-- **Memory & Sharding (Role-Based):** `MAX_MEMORY={0: "22GiB", 1: "15GiB", 2: "15GiB", "cpu": "4GiB"}`. Small CPU fallback allowed to prevent meta device initialization hang.
-- **Component Pinning:** Sequential AR components (`text_encoder`, `vision_language_encoder`) and `vae` are manually pinned to **GPU 0 (RTX 4090)** to eliminate sharding latency and cross-device I2I errors. Transformer is sharded across all GPUs.
-- **No Quantization:** Full `torch.bfloat16`. 
+- **Memory & Sharding (Role-Based):** `MAX_MEMORY={0: "22GiB", 1: "13GiB", 2: "13GiB", "cpu": "4GiB"}`.
+- **8-bit Quantization:** Enabled via `BitsAndBytesConfig(load_in_8bit=True)` to reduce VRAM footprint.
+- **Component Pinning:** Sequential AR components (`text_encoder`, `vision_language_encoder`) and `vae` are manually pinned to **GPU 0 (RTX 4090)** to eliminate sharding latency. Transformer is sharded across all GPUs.
+- **No VAE Offload:** VAE runs natively on GPU 0 to ensure tensor device consistency.
 - **AR sampling:** `temperature=0.9`, `top_p=0.75`, `do_sample=True` — set on `vision_language_encoder.generation_config` after model load
 - **Configurable generation params:** `num_inference_steps` (20-75, default 50 T2I / 35 I2I), `guidance_scale` (1.0-5.0, default 1.5) — exposed via frontend UI sliders
 - **torch.compile:** Transformer compiled with `reduce-overhead` mode for ~2-4x diffusion speedup
 - **Optimizations:** VAE slicing + tiling, attention slicing (transformer), Flash SDP + mem-efficient SDP, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128`
 - **Pre-flight checks:** Blackwell (sm_120) architecture validation, PCIe topology logging, per-GPU parameter distribution logging
-- **Est. VRAM peak:** GPU 0: 9–12 GB | GPU 1: 9–12 GB | GPU 2: 14–20 GB | Supports up to 2048x2048
+- **Est. VRAM peak:** GPU 0: 14-16 GB | GPU 1 & 2: 10-12 GB | Supports up to 2048x2048
 - **Inference server:** `glm_image_server/main.py` — thread pool executor, inference lock, no idle unload
 - **Concurrency:** asyncio.Lock ensures 1 inference at a time; `run_in_executor` keeps event loop responsive
 
@@ -121,6 +122,7 @@ This section contains critical agent behavior guidelines. Any changes require ex
 - Commit every function change so you can roll back and view the code history in case of a malfunction or a failed change.
 - Do not re-read files that have already been read in this session unless necessary.
 - Minimize non-essential tool calls.
+- Save every plan or specification to the `docs/plans/` folder so you can track which plans have been created or are currently being created. This allows you to resume the session if the AI agent's token expires. USE `Superpowers` skill to provide the plan.
 
 ===========================
 
