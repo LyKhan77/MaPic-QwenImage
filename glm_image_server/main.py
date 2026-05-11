@@ -127,8 +127,11 @@ def load_model():
             update_progress(15, "Loading pipeline weights (8-bit, balanced)...")
             logger.info("Loading GLM-Image pipeline (8-bit, device_map=balanced)...")
 
-            from transformers import BitsAndBytesConfig
-            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+            from diffusers.quantizers import PipelineQuantizationConfig
+            quantization_config = PipelineQuantizationConfig(
+                quant_backend="bitsandbytes_8bit",
+                quant_kwargs={"load_in_8bit": True},
+            )
 
             # Load with balanced map first to handle the massive transformer weights
             pipe = GlmImagePipeline.from_pretrained(
