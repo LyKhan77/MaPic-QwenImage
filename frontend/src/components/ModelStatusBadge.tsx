@@ -20,6 +20,10 @@ const statusConfig: Record<ModelStatus, { label: string; color: string; pulse: b
 
 export default function ModelStatusBadge({ status, onLoad, onUnload, progress = 0, message = '', elapsed = 0 }: ModelStatusBadgeProps) {
   const config = statusConfig[status] || statusConfig.offline
+  const ringRadius = 8
+  const ringCircumference = 2 * Math.PI * ringRadius
+  const clampedProgress = Math.min(100, Math.max(0, progress))
+  const ringDashOffset = ringCircumference * (1 - clampedProgress / 100)
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60)
@@ -28,16 +32,54 @@ export default function ModelStatusBadge({ status, onLoad, onUnload, progress = 
   }
 
   return (
-    <div className="group flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 ring-1 ring-white/10 transition-all hover:bg-white/10">
-      <span className="relative flex h-2 w-2">
-        {config.pulse && (
-          <span className={`absolute inset-0 rounded-full ${config.color} opacity-75 animate-ping`} />
-        )}
-        <motion.span
-          layout
-          className={`relative inline-flex h-2 w-2 rounded-full ${config.color} shadow-[0_0_6px]`}
-        />
-      </span>
+    <motion.div
+      layout
+      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+      className="group flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 ring-1 ring-white/10 transition-all hover:bg-white/10"
+    >
+      {status === 'loading' ? (
+        <span className="relative flex h-5 w-5 items-center justify-center">
+          <svg
+            className="absolute inset-0 h-5 w-5 animate-[spin_3s_linear_infinite]"
+            viewBox="0 0 20 20"
+            aria-hidden="true"
+          >
+            <g transform="rotate(-90 10 10)">
+              <circle
+                cx="10"
+                cy="10"
+                r={ringRadius}
+                fill="none"
+                stroke="rgba(255,255,255,0.1)"
+                strokeWidth="2"
+              />
+              <circle
+                cx="10"
+                cy="10"
+                r={ringRadius}
+                fill="none"
+                stroke="#fbbf24"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeDasharray={ringCircumference}
+                strokeDashoffset={ringDashOffset}
+              />
+            </g>
+          </svg>
+          <span className="absolute h-2 w-2 rounded-full bg-amber-400 shadow-amber-400/50 opacity-75 animate-ping" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-400 shadow-[0_0_6px] shadow-amber-400/50" />
+        </span>
+      ) : (
+        <span className="relative flex h-2 w-2">
+          {config.pulse && (
+            <span className={`absolute inset-0 rounded-full ${config.color} opacity-75 animate-ping`} />
+          )}
+          <motion.span
+            layout
+            className={`relative inline-flex h-2 w-2 rounded-full ${config.color} shadow-[0_0_6px]`}
+          />
+        </span>
+      )}
       <span className="text-[10px] font-mono tracking-widest text-muted-foreground uppercase">
         Model
       </span>
@@ -60,9 +102,11 @@ export default function ModelStatusBadge({ status, onLoad, onUnload, progress = 
 
         {status === 'loading' && message && (
           <motion.span
-            initial={{ opacity: 0, width: 0 }}
-            animate={{ opacity: 1, width: 'auto' }}
-            className="ml-1.5 text-[9px] text-amber-400/80 normal-case tracking-normal whitespace-nowrap overflow-hidden flex items-center gap-1"
+            initial={{ opacity: 0, x: -4 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -4 }}
+            transition={{ duration: 0.2 }}
+            className="ml-1.5 text-[11px] text-amber-400/80 normal-case tracking-normal whitespace-nowrap flex items-center gap-1"
           >
             <span>{message}</span>
             {elapsed > 0 && <span className="opacity-70 font-mono">({formatTime(elapsed)})</span>}
@@ -84,15 +128,6 @@ export default function ModelStatusBadge({ status, onLoad, onUnload, progress = 
         </button>
       )}
 
-      {status === 'loading' && progress > 0 && (
-        <div className="absolute -bottom-[2px] left-3 right-3 h-[2px] bg-white/5 rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-amber-400 rounded-full transition-all duration-1000 ease-linear animate-pulse"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-      )}
-
       {status === 'unloaded' && onLoad && (
         <button 
           onClick={onLoad}
@@ -105,6 +140,6 @@ export default function ModelStatusBadge({ status, onLoad, onUnload, progress = 
           </span>
         </button>
       )}
-    </div>
+    </motion.div>
   )
 }
