@@ -30,8 +30,8 @@ project references :
 - **Concurrency:** asyncio.Lock ensures 1 inference at a time; `run_in_executor` keeps event loop responsive
 - **Generation queue UX:** Loading screen is read-only, but users can click New Generation during active work to open one clean prompt input and submit additional backend-queued jobs.
 - **Global generation capacity:** Backend rejects new `/api/generate` requests with HTTP 429 when 10 active/accepted generation jobs are already in memory across all users.
-- **Active generations indicator:** Bottom-right floating pill (`ActiveGenerationsIndicator`) shows all in-flight generations across users, including multiple jobs per user and a `/10` global capacity count. User's own entries are clickable to refocus the canvas; others are view-only.
-- **Backend active tracking:** `GET /api/generations/active` returns in-memory tracked jobs with elapsed time.
+- **Active generations indicator:** Bottom-right floating pill (`ActiveGenerationsIndicator`) shows all in-flight generations across users, including multiple jobs per user and a `/10` global capacity count. User's own entries are clickable to refocus the canvas; others are view-only. Queued jobs show `queued` instead of a running timer.
+- **Backend active tracking:** `GET /api/generations/active` returns in-memory tracked jobs with `queued` / `running` / `saving` status. Generation elapsed time starts only after a job acquires the backend generation lock and begins the GLM request.
 - **Configurable generation params:** `num_inference_steps` (20-75, default 50 T2I / 35 I2I), `guidance_scale` (1.0-5.0, default 1.5) — exposed via frontend UI sliders
 - **torch.compile:** Transformer compiled with `reduce-overhead` mode for ~2-4x diffusion speedup
 - **Optimizations:** VAE slicing + tiling, attention slicing (transformer), Flash SDP + mem-efficient SDP, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128`

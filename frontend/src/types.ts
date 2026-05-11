@@ -12,4 +12,5 @@ export interface ActiveGeneration {
   user_id: string
   prompt: string
   elapsed_seconds: number
+  status?: 'queued' | 'running' | 'saving'
 }

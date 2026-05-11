@@ -26,3 +26,4 @@ class ActiveGeneration(BaseModel):
     user_id: str
     prompt: str
     elapsed_seconds: int
+    status: str = "running"

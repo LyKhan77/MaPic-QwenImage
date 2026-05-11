@@ -1,4 +1,5 @@
 import time
+import asyncio
 from uuid import UUID, uuid4
 
 import logging
@@ -53,6 +54,7 @@ if not _logging_configured:
 # In-memory tracking of active generations
 MAX_GLOBAL_GENERATIONS = 10
 _active_generations: dict[str, dict] = {}
+_generation_lock = asyncio.Lock()
 
 
 def _can_accept_generation(active_generations: dict[str, dict]) -> bool:
@@ -116,7 +118,8 @@ async def api_active_generations():
             id=gen_id,
             user_id=str(info["user_id"]),
             prompt=info["prompt"],
-            elapsed_seconds=int(now - info["start_time"]),
+            elapsed_seconds=int(now - info["started_at"]) if info.get("started_at") else 0,
+            status=info.get("status", "running"),
         ))
     return result
 
@@ -133,10 +136,23 @@ async def generate(payload: GenerateRequest):
     _active_generations[gen_id] = {
         "user_id": payload.user_id,
         "prompt": payload.prompt,
-        "start_time": time.time(),
+        "queued_at": time.time(),
+        "started_at": None,
+        "status": "queued",
     }
     try:
-        image_bytes = await generate_image_bytes(payload.prompt, payload.images, payload.num_inference_steps, payload.guidance_scale)
+        async with _generation_lock:
+            active_info = _active_generations.get(gen_id)
+            if active_info is not None:
+                active_info["started_at"] = time.time()
+                active_info["status"] = "running"
+
+            image_bytes = await generate_image_bytes(payload.prompt, payload.images, payload.num_inference_steps, payload.guidance_scale)
+
+        active_info = _active_generations.get(gen_id)
+        if active_info is not None:
+            active_info["status"] = "saving"
+
         image_path, public_url = upload_image(payload.user_id, image_bytes)
         record = insert_generation(payload.user_id, payload.prompt, image_path, public_url)
         return record

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ActiveGeneration } from '../types'
 import { cn } from '../lib/utils'
@@ -17,6 +17,12 @@ function formatElapsed(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+function formatGenerationStatus(gen: ActiveGeneration, globalStage?: string): string {
+  if (gen.status === 'queued') return 'queued'
+  if (gen.status === 'saving') return `${formatElapsed(gen.elapsed_seconds)} · saving`
+  return `${formatElapsed(gen.elapsed_seconds)} · ${globalStage || 'processing'}`
+}
+
 export default function ActiveGenerationsIndicator({
   activeGenerations,
   pendingGenerations,
@@ -25,9 +31,17 @@ export default function ActiveGenerationsIndicator({
   onFocusMyGen,
 }: ActiveGenerationsIndicatorProps) {
   const [isHovered, setIsHovered] = useState(false)
+  const [now, setNow] = useState(0)
   const showHoverPanel = useCallback(() => setIsHovered(true), [])
   const hideHoverPanel = useCallback(() => setIsHovered(false), [])
-  const now = Date.now()
+
+  useEffect(() => {
+    const updateNow = () => setNow(Date.now())
+    updateNow()
+    const intervalId = window.setInterval(updateNow, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [])
+
   const optimisticGenerations: ActiveGeneration[] = Object.entries(pendingGenerations)
     .filter(([, pending]) => !activeGenerations.some(gen =>
       gen.user_id === currentUserId && gen.prompt === pending.prompt
@@ -37,6 +51,7 @@ export default function ActiveGenerationsIndicator({
       user_id: currentUserId,
       prompt: pending.prompt,
       elapsed_seconds: Math.max(0, Math.floor((now - pending.startedAt) / 1000)),
+      status: 'queued',
     }))
   const displayedGenerations = [...activeGenerations, ...optimisticGenerations]
 
@@ -103,7 +118,7 @@ export default function ActiveGenerationsIndicator({
                   </div>
                   <p className="text-xs font-medium text-foreground mt-1 line-clamp-1">{gen.prompt}</p>
                   <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
-                    {formatElapsed(gen.elapsed_seconds)} · {globalStage || 'processing'}
+                    {formatGenerationStatus(gen, globalStage)}
                   </p>
                 </button>
               ))}
@@ -122,7 +137,7 @@ export default function ActiveGenerationsIndicator({
                   </div>
                   <p className="text-xs text-muted-foreground/60 mt-1 line-clamp-1">{gen.prompt}</p>
                   <p className="text-[10px] font-mono text-muted-foreground/40 mt-0.5">
-                    {formatElapsed(gen.elapsed_seconds)}
+                    {formatGenerationStatus(gen)}
                   </p>
                 </div>
               ))}
