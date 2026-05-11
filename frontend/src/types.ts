@@ -6,3 +6,10 @@ export interface Generation {
   public_url: string
   created_at: string
 }
+
+export interface ActiveGeneration {
+  id: string
+  user_id: string
+  prompt: string
+  elapsed_seconds: number
+}

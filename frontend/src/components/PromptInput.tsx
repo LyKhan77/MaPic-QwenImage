@@ -16,9 +16,10 @@ interface PromptInputProps {
   initialPrompt?: string
   initialImageUrl?: string
   modelStatus?: ModelStatus
+  queueLength?: number
 }
 
-export default function PromptInput({ onGenerate, isLoading, isCentralized, onTyping, initialPrompt, initialImageUrl, modelStatus }: PromptInputProps) {
+export default function PromptInput({ onGenerate, isLoading, isCentralized, onTyping, initialPrompt, initialImageUrl, modelStatus, queueLength = 0 }: PromptInputProps) {
   const [prompt, setPrompt] = useState('')
   const [showReferences, setShowReferences] = useState(true)
   const [images, setImages] = useState<{ id: string; base64: string }[]>([])
@@ -112,7 +113,8 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
   }
 
   const handleSubmit = () => {
-    if (!prompt.trim() || isLoading || !isModelReady) return
+    if (!prompt.trim() || !isModelReady) return
+    if (isLoading && queueLength === undefined) return
 
     const cleanImages = images.length > 0
       ? images.map(img => img.base64.includes(',') ? img.base64.split(',')[1] : img.base64)
@@ -195,17 +197,26 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
 
           <button
             onClick={handleSubmit}
-            disabled={!prompt.trim() || isLoading || !isModelReady}
+            disabled={!prompt.trim() || !isModelReady}
             className={`group shrink-0 flex items-center justify-center transition-all ${isCentralized ? 'h-10 w-10 rounded-full bg-white text-black hover:bg-primary disabled:bg-gray-600' : 'rounded-lg bg-foreground px-4 py-2 text-sm font-bold text-background hover:bg-primary hover:text-primary-foreground'}`}
           >
             {isCentralized ? <Send size={18} /> : (
                 <>
-                    <span>GENERATE</span>
+                    <span>{isLoading ? `QUEUE (${queueLength + 1})` : 'GENERATE'}</span>
                     <Send size={14} className="ml-2 transition-transform group-hover:translate-x-1" />
                 </>
             )}
           </button>
         </div>
+
+        {/* Queue badge */}
+        {queueLength > 0 && (
+          <div className="flex items-center justify-end px-1">
+            <span className="text-[10px] font-mono text-primary/70">
+              {queueLength} queued
+            </span>
+          </div>
+        )}
 
         {/* Reference Images Dropdown */}
         {images.length > 0 && (

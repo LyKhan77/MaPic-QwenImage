@@ -19,3 +19,10 @@ class Generation(BaseModel):
     image_path: str
     public_url: str
     created_at: datetime
+
+
+class ActiveGeneration(BaseModel):
+    id: str
+    user_id: str
+    prompt: str
+    elapsed_seconds: int

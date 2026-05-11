@@ -1,4 +1,5 @@
-from uuid import UUID
+import time
+from uuid import UUID, uuid4
 
 import logging
 
@@ -9,7 +10,7 @@ from fastapi.responses import StreamingResponse
 
 try:
     from backend.config import CORS_ORIGINS, GLM_IMAGE_API_URL
-    from backend.schemas import GenerateRequest, Generation
+    from backend.schemas import ActiveGeneration, GenerateRequest, Generation
     from backend.services.glm_image_service import GlmImageError, generate_image_bytes, get_generation_status, get_health_status, load_model, unload_model, stream_load_model
     from backend.services.supabase_service import (
         SupabaseError,
@@ -20,7 +21,7 @@ try:
     )
 except ModuleNotFoundError:
     from config import CORS_ORIGINS, GLM_IMAGE_API_URL
-    from schemas import GenerateRequest, Generation
+    from schemas import ActiveGeneration, GenerateRequest, Generation
     from services.glm_image_service import GlmImageError, generate_image_bytes, get_generation_status, get_health_status, load_model, unload_model, stream_load_model
     from services.supabase_service import (
         SupabaseError,
@@ -32,6 +33,9 @@ except ModuleNotFoundError:
 
 app = FastAPI(title="Mapic API", version="1.0.0")
 logger = logging.getLogger("mapic")
+
+# In-memory tracking of active generations
+_active_generations: dict[str, dict] = {}
 
 origins = [origin.strip() for origin in CORS_ORIGINS.split(",") if origin.strip()]
 
@@ -82,8 +86,28 @@ async def api_generation_status():
         return {"stage": "idle", "step": 0, "total_steps": 0}
 
 
+@app.get("/api/generations/active", response_model=list[ActiveGeneration])
+async def api_active_generations():
+    now = time.time()
+    result = []
+    for gen_id, info in _active_generations.items():
+        result.append(ActiveGeneration(
+            id=gen_id,
+            user_id=str(info["user_id"]),
+            prompt=info["prompt"],
+            elapsed_seconds=int(now - info["start_time"]),
+        ))
+    return result
+
+
 @app.post("/api/generate", response_model=Generation)
 async def generate(payload: GenerateRequest):
+    gen_id = str(uuid4())
+    _active_generations[gen_id] = {
+        "user_id": payload.user_id,
+        "prompt": payload.prompt,
+        "start_time": time.time(),
+    }
     try:
         image_bytes = await generate_image_bytes(payload.prompt, payload.images, payload.num_inference_steps, payload.guidance_scale)
         image_path, public_url = upload_image(payload.user_id, image_bytes)
@@ -98,6 +122,8 @@ async def generate(payload: GenerateRequest):
     except Exception as exc:
         logger.exception("Unhandled error during generate")
         raise HTTPException(status_code=500, detail="Internal server error") from exc
+    finally:
+        _active_generations.pop(gen_id, None)
 
 
 @app.get("/api/history/{user_id}", response_model=list[Generation])

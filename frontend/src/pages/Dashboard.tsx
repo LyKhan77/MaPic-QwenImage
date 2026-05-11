@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -7,7 +7,8 @@ import ImageCanvas from '../components/ImageCanvas'
 import PromptInput from '../components/PromptInput'
 import ModelStatusBadge from '../components/ModelStatusBadge'
 import GenerationStageBadge from '../components/GenerationStageBadge'
-import type { Generation } from '../types'
+import ActiveGenerationsIndicator from '../components/ActiveGenerationsIndicator'
+import type { Generation, ActiveGeneration } from '../types'
 import type { GenerationOptions } from '../components/PromptInput'
 import { Toaster, toast } from 'sonner'
 
@@ -23,6 +24,10 @@ export default function Dashboard({ session }: DashboardProps) {
   const [loadElapsed, setLoadElapsed] = useState(0)
   const [pendingGenParams, setPendingGenParams] = useState<{ steps: number; numRefImages: number } | null>(null)
   const [genKey, setGenKey] = useState(0)
+  const [queue, setQueue] = useState<Array<{ prompt: string; images?: string[]; options?: GenerationOptions }>>([])
+  const [activeGenerations, setActiveGenerations] = useState<ActiveGeneration[]>([])
+  const [globalStage, setGlobalStage] = useState('idle')
+  const isDraining = useRef(false)
 
   // Poll model health status
   const { data: modelStatus = 'offline' } = useQuery({
@@ -53,6 +58,23 @@ export default function Dashboard({ session }: DashboardProps) {
     }
     return () => clearInterval(interval)
   }, [modelStatus])
+
+  // Poll active generations + global stage
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      const [active, status] = await Promise.all([
+        api.getActiveGenerations(),
+        api.getGenerationStatus(),
+      ])
+      setActiveGenerations(active)
+      if (status.stage && status.stage !== 'idle') {
+        setGlobalStage(status.stage)
+      } else {
+        setGlobalStage('idle')
+      }
+    }, 2000)
+    return () => clearInterval(poll)
+  }, [])
 
   // Fetch History
   const { data: history = [] } = useQuery({
@@ -85,6 +107,27 @@ export default function Dashboard({ session }: DashboardProps) {
       setPendingGenParams(null)
     },
   })
+
+  // Auto-drain queue
+  useEffect(() => {
+    if (!generateMutation.isPending && queue.length > 0 && !isDraining.current) {
+      isDraining.current = true
+      const next = queue[0]
+      setQueue(prev => prev.slice(1))
+      generateMutation.mutate({ prompt: next.prompt, images: next.images, options: next.options })
+      // Reset flag after mutation starts
+      requestAnimationFrame(() => { isDraining.current = false })
+    }
+  }, [generateMutation.isPending, queue])
+
+  const handleGenerate = useCallback((prompt: string, images?: string[], options?: GenerationOptions) => {
+    if (generateMutation.isPending) {
+      setQueue(prev => [...prev, { prompt, images, options }])
+      toast.info(`Queued (${queue.length + 1} pending)`)
+    } else {
+      generateMutation.mutate({ prompt, images, options })
+    }
+  }, [generateMutation, queue.length])
 
   // Delete Mutation
   const deleteMutation = useMutation({
@@ -139,6 +182,10 @@ export default function Dashboard({ session }: DashboardProps) {
     }
   }
 
+  const handleFocusMyGen = useCallback(() => {
+    setCurrentGen(null)
+  }, [])
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background text-foreground font-sans">
       <Toaster position="top-right" theme="dark" />
@@ -167,7 +214,7 @@ export default function Dashboard({ session }: DashboardProps) {
              currentGeneration={currentGen}
              isLoading={generateMutation.isPending}
              modelStatus={modelStatus}
-             onGenerate={(prompt, images, options) => generateMutation.mutate({ prompt, images, options })}
+             onGenerate={handleGenerate}
              pendingGenParams={pendingGenParams ?? undefined}
              genKey={genKey}
            />
@@ -176,15 +223,23 @@ export default function Dashboard({ session }: DashboardProps) {
         {currentGen && (
           <div className="shrink-0 w-full bg-background relative z-20">
             <PromptInput
-              onGenerate={(prompt, images, options) => generateMutation.mutate({ prompt, images, options })}
+              onGenerate={handleGenerate}
               isLoading={generateMutation.isPending}
               isCentralized={false}
               initialPrompt={currentGen.prompt}
               initialImageUrl={currentGen.public_url}
               modelStatus={modelStatus}
+              queueLength={queue.length}
             />
           </div>
         )}
+
+        <ActiveGenerationsIndicator
+          activeGenerations={activeGenerations}
+          currentUserId={session.user.id}
+          globalStage={globalStage}
+          onFocusMyGen={handleFocusMyGen}
+        />
       </main>
     </div>
   )

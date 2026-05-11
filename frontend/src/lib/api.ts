@@ -103,5 +103,15 @@ export const api = {
     } catch {
       return { stage: 'idle', step: 0, total_steps: 0 }
     }
+  },
+
+  async getActiveGenerations() {
+    try {
+      const res = await fetch(`${API_URL}/generations/active`)
+      if (!res.ok) return []
+      return res.json()
+    } catch {
+      return []
+    }
   }
 }
