@@ -7,6 +7,7 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+import uvicorn.logging
 
 try:
     from backend.config import CORS_ORIGINS, GLM_IMAGE_API_URL
@@ -33,6 +34,21 @@ except ModuleNotFoundError:
 
 app = FastAPI(title="Mapic API", version="1.0.0")
 logger = logging.getLogger("mapic")
+
+# Suppress access logs for successful polling GETs to reduce log noise
+class _QuietPollingFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        # Suppress 200 OK responses for GET requests (health checks, status polling)
+        if '"GET ' in msg and '200 OK' in msg:
+            return False
+        return True
+
+_logging_configured = False
+if not _logging_configured:
+    access_logger = logging.getLogger("uvicorn.access")
+    access_logger.addFilter(_QuietPollingFilter())
+    _logging_configured = True
 
 # In-memory tracking of active generations
 _active_generations: dict[str, dict] = {}

@@ -260,6 +260,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="GLM-Image Server", lifespan=lifespan)
 
+# Suppress access logs for successful polling GETs to reduce log noise
+class _QuietPollingFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if '"GET ' in msg and '200 OK' in msg:
+            return False
+        return True
+
+logging.getLogger("uvicorn.access").addFilter(_QuietPollingFilter())
+
 
 class T2IRequest(BaseModel):
     prompt: str

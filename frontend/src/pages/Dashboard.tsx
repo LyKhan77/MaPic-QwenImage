@@ -59,22 +59,24 @@ export default function Dashboard({ session }: DashboardProps) {
     return () => clearInterval(interval)
   }, [modelStatus])
 
-  // Poll active generations + global stage
+  // Poll active generations + global stage (only when relevant)
   useEffect(() => {
+    const shouldPoll = generateMutation.isPending || activeGenerations.length > 0
+    if (!shouldPoll) {
+      setGlobalStage('idle')
+      return
+    }
+
     const poll = setInterval(async () => {
       const [active, status] = await Promise.all([
         api.getActiveGenerations(),
         api.getGenerationStatus(),
       ])
       setActiveGenerations(active)
-      if (status.stage && status.stage !== 'idle') {
-        setGlobalStage(status.stage)
-      } else {
-        setGlobalStage('idle')
-      }
-    }, 2000)
+      setGlobalStage(status.stage && status.stage !== 'idle' ? status.stage : 'idle')
+    }, 3000)
     return () => clearInterval(poll)
-  }, [])
+  }, [generateMutation.isPending, activeGenerations.length])
 
   // Fetch History
   const { data: history = [] } = useQuery({
