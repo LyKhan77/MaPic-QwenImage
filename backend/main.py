@@ -120,6 +120,8 @@ async def api_active_generations():
             prompt=info["prompt"],
             elapsed_seconds=int(now - info["started_at"]) if info.get("started_at") else 0,
             status=info.get("status", "running"),
+            num_inference_steps=info.get("num_inference_steps", 50),
+            num_ref_images=info.get("num_ref_images", 0),
         ))
     return result
 
@@ -139,6 +141,8 @@ async def generate(payload: GenerateRequest):
         "queued_at": time.time(),
         "started_at": None,
         "status": "queued",
+        "num_inference_steps": payload.num_inference_steps,
+        "num_ref_images": len(payload.images or []),
     }
     try:
         async with _generation_lock:

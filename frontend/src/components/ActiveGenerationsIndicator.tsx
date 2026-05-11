@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ActiveGeneration } from '../types'
 import { cn } from '../lib/utils'
+import { getDisplayedGenerations } from '../lib/activeGenerationState'
 
 interface ActiveGenerationsIndicatorProps {
   activeGenerations: ActiveGeneration[]
@@ -42,18 +43,7 @@ export default function ActiveGenerationsIndicator({
     return () => window.clearInterval(intervalId)
   }, [])
 
-  const optimisticGenerations: ActiveGeneration[] = Object.entries(pendingGenerations)
-    .filter(([, pending]) => !activeGenerations.some(gen =>
-      gen.user_id === currentUserId && gen.prompt === pending.prompt
-    ))
-    .map(([id, pending]) => ({
-      id,
-      user_id: currentUserId,
-      prompt: pending.prompt,
-      elapsed_seconds: Math.max(0, Math.floor((now - pending.startedAt) / 1000)),
-      status: 'queued',
-    }))
-  const displayedGenerations = [...activeGenerations, ...optimisticGenerations]
+  const displayedGenerations = getDisplayedGenerations(activeGenerations, pendingGenerations, currentUserId, now)
 
   if (displayedGenerations.length === 0) return null
 

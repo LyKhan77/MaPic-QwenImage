@@ -27,3 +27,5 @@ class ActiveGeneration(BaseModel):
     prompt: str
     elapsed_seconds: int
     status: str = "running"
+    num_inference_steps: int = 50
+    num_ref_images: int = 0

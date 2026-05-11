@@ -7,6 +7,7 @@
     "dev": "vite --host",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "check:active-generations": "node --experimental-strip-types scripts/check-active-generation-state.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

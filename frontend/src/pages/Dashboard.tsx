@@ -11,6 +11,7 @@ import ActiveGenerationsIndicator from '../components/ActiveGenerationsIndicator
 import type { Generation, ActiveGeneration } from '../types'
 import type { GenerationOptions } from '../components/PromptInput'
 import { Toaster, toast } from 'sonner'
+import { getActiveGenerationParams, hasGenerationWorkForUser } from '../lib/activeGenerationState'
 
 interface DashboardProps {
   session: Session
@@ -42,7 +43,10 @@ export default function Dashboard({ session }: DashboardProps) {
     !activeGenerations.some(gen => gen.user_id === session.user.id && gen.prompt === pending.prompt)
   ).length
   const displayedGenerationCount = activeGenerations.length + optimisticPendingCount
-  const hasPendingGenerations = pendingGenerationCount > 0
+  const hasCurrentUserGenerationWork = hasGenerationWorkForUser(activeGenerations, pendingGenerations, session.user.id)
+  const activeGenerationParams = getActiveGenerationParams(activeGenerations, session.user.id)
+  const displayedGenParams = pendingGenParams ?? activeGenerationParams
+  const isViewingCurrentUserActiveGeneration = isViewingActiveGeneration || (!currentGen && hasCurrentUserGenerationWork)
 
   // Poll model health status
   const { data: modelStatus = 'offline' } = useQuery({
@@ -81,24 +85,27 @@ export default function Dashboard({ session }: DashboardProps) {
     select: (data) => data.filter((item: Generation) => item.image_path?.endsWith('.png') || item.public_url?.endsWith('.png'))
   })
 
-  // Poll active generations + global stage (only when relevant)
+  // Poll active generations + global stage for all users. This rehydrates active work after refresh.
   useEffect(() => {
-    const shouldPoll = hasPendingGenerations || activeGenerations.length > 0
-    if (!shouldPoll) {
-      setGlobalStage('idle')
-      return
-    }
+    let isMounted = true
 
-    const poll = setInterval(async () => {
+    const poll = async () => {
       const [active, status] = await Promise.all([
         api.getActiveGenerations(),
         api.getGenerationStatus(),
       ])
+      if (!isMounted) return
       setActiveGenerations(active)
       setGlobalStage(status.stage && status.stage !== 'idle' ? status.stage : 'idle')
-    }, 3000)
-    return () => clearInterval(poll)
-  }, [hasPendingGenerations, activeGenerations.length])
+    }
+
+    void poll()
+    const intervalId = setInterval(poll, 3000)
+    return () => {
+      isMounted = false
+      clearInterval(intervalId)
+    }
+  }, [])
 
   const handleGenerate = useCallback((prompt: string, images?: string[], options?: GenerationOptions) => {
     if (displayedGenerationCount >= MAX_GLOBAL_GENERATIONS) {
@@ -223,19 +230,19 @@ export default function Dashboard({ session }: DashboardProps) {
              <ModelStatusBadge status={modelStatus} onLoad={handleLoadModel} onUnload={handleUnloadModel} progress={loadProgress} message={loadMessage} elapsed={loadElapsed} />
              <GenerationStageBadge
                key={`stage-${genKey}`}
-               isLoading={hasPendingGenerations}
-               steps={pendingGenParams?.steps ?? 50}
-               numRefImages={pendingGenParams?.numRefImages ?? 0}
+               isLoading={hasCurrentUserGenerationWork}
+               steps={displayedGenParams?.steps ?? 50}
+               numRefImages={displayedGenParams?.numRefImages ?? 0}
              />
            </div>
            <ImageCanvas
              currentGeneration={currentGen}
-             isLoading={hasPendingGenerations}
+             isLoading={hasCurrentUserGenerationWork}
              modelStatus={modelStatus}
              onGenerate={handleGenerate}
-             pendingGenParams={pendingGenParams ?? undefined}
+             pendingGenParams={displayedGenParams ?? undefined}
              genKey={genKey}
-             isViewingActiveGeneration={isViewingActiveGeneration}
+             isViewingActiveGeneration={isViewingCurrentUserActiveGeneration}
            />
         </div>
 
@@ -243,7 +250,7 @@ export default function Dashboard({ session }: DashboardProps) {
           <div className="shrink-0 w-full bg-background relative z-20">
             <PromptInput
               onGenerate={handleGenerate}
-              isLoading={hasPendingGenerations}
+              isLoading={hasCurrentUserGenerationWork}
               isCentralized={false}
               initialPrompt={!isViewingActiveGeneration ? currentGen.prompt : undefined}
               initialImageUrl={!isViewingActiveGeneration ? currentGen.public_url : undefined}

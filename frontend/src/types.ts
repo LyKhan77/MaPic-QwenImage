@@ -13,4 +13,6 @@ export interface ActiveGeneration {
   prompt: string
   elapsed_seconds: number
   status?: 'queued' | 'running' | 'saving'
+  num_inference_steps?: number
+  num_ref_images?: number
 }

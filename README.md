@@ -13,7 +13,7 @@ MaPic turns text prompts and reference images into production-quality visuals â€
 *   **VRAM Optimization (Soft Unload):** Automatically unloads the model from GPU VRAM after 1 hour of inactivity to save resources. Supports manual **Load/Unload** directly from the UI status badge.
 *   **On-Demand Loading:** Automatically reloads the model when a new generation request is made, ensuring a seamless experience even after the model has been idle.
 *   **History Management:** Automatically saves generated images and prompts. View, select, and delete history items.
-*   **Multi-Generation Queue:** Start a new prompt while another image is generating; accepted requests appear in the active generations indicator as queued until inference begins.
+*   **Multi-Generation Queue:** Start a new prompt while another image is generating; accepted requests appear in the active generations indicator as queued until inference begins, and active queues recover after page refresh.
 *   **Global Capacity Limit:** Backend accepts up to 10 active or queued generation requests across all users.
 *   **Responsive Design:** Collapsible sidebar and mobile-friendly layout.
 *   **Secure Auth:** Google OAuth 2.0 via Supabase Authentication.
@@ -137,7 +137,7 @@ cd frontend && npm run dev
 3.  Attach reference images (up to 3, max 2MB each) via the paperclip button.
 4.  Click **Generate** or press Enter.
 5.  Wait on the read-only loading screen while the image is generated, or click **New Generation** to open a single new prompt input.
-6.  Submit more prompts while other generations run; each request is queued by the backend and shown in the active generations indicator. Queued jobs do not start their generation timer until inference begins.
+6.  Submit more prompts while other generations run; each request is queued by the backend and shown in the active generations indicator across users. Queued jobs do not start their generation timer until inference begins, and your active generation view recovers after refresh.
 7.  View completed creations in the main canvas.
 8.  Use the bottom prompt input on a result page to start another generation.
 9.  Use the **Sidebar** to access previous generations or switch themes.
