@@ -16,10 +16,10 @@ project references :
 - **3-service stack:** Frontend (:5151) → Backend (:8181) → GLM-Image Server (:30000)
 - **Removed:** Ollama service, Z.ai cloud service, model selector UI, idle timeout/monitor
 - **Multi-reference support:** Up to 3 reference images for I2I generation
-- **Hardware:** RTX 5080 (16GB) + RTX 5080 (16GB) + RTX 4090 (24GB) — triple GPU via `device_map="balanced"`
-- **Memory:** `MAX_MEMORY={0: "15GiB", 1: "15GiB", 2: "23GiB", "cpu": "4GiB"}` — balanced for heterogeneous GPUs
-- **8-bit Quantization:** `bitsandbytes` INT8 for transformer + vision_language_encoder — halves weight memory (~32 GB -> ~16 GB), needed because balanced split puts most weight on 2x 16 GB GPUs
-- **VAE on GPU 2:** VAE placed on RTX 4090 (cuda:2) for native GPU encode/decode — no CPU roundtrips
+- **Hardware:** RTX 5080 (16GB) + RTX 5080 (16GB) + RTX 4090 (24GB) — triple GPU
+- **Memory & Sharding (Role-Based):** `MAX_MEMORY={0: "22GiB", 1: "15GiB", 2: "15GiB", "cpu": "4GiB"}`. Small CPU fallback allowed to prevent meta device initialization hang.
+- **Component Pinning:** Sequential AR components (`text_encoder`, `vision_language_encoder`) and `vae` are manually pinned to **GPU 0 (RTX 4090)** to eliminate sharding latency and cross-device I2I errors. Transformer is sharded across all GPUs.
+- **No Quantization:** Full `torch.bfloat16`. 
 - **AR sampling:** `temperature=0.9`, `top_p=0.75`, `do_sample=True` — set on `vision_language_encoder.generation_config` after model load
 - **Configurable generation params:** `num_inference_steps` (20-75, default 50 T2I / 35 I2I), `guidance_scale` (1.0-5.0, default 1.5) — exposed via frontend UI sliders
 - **torch.compile:** Transformer compiled with `reduce-overhead` mode for ~2-4x diffusion speedup
@@ -101,7 +101,7 @@ MaPic/
 1. **User** → Frontend (`:5151`) submits prompt (+ optional reference images)
 2. **Frontend** → Backend (`:8181`) `POST /api/generate` with prompt + base64 images
 3. **Backend** → GLM-Image Server (`:30000`) `POST /v1/images/generations` or `/v1/images/edits`
-4. **GLM-Image Server** runs `GlmImagePipeline` inference (3-GPU, bf16, torch.compile, VAE on GPU 2)
+4. **GLM-Image Server** runs `GlmImagePipeline` inference (3-GPU, bf16, role-based pinning: AR/VAE on GPU 0)
 5. **Backend** receives base64 image → uploads to Supabase Storage → inserts record to PostgreSQL → returns Generation to Frontend
 6. **Frontend** displays image and updates history sidebar
 
