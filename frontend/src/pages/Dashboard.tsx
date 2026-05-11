@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -16,6 +16,15 @@ interface DashboardProps {
   session: Session
 }
 
+const MAX_GLOBAL_GENERATIONS = 10
+
+interface PendingGeneration {
+  prompt: string
+  images?: string[]
+  options?: GenerationOptions
+  startedAt: number
+}
+
 export default function Dashboard({ session }: DashboardProps) {
   const queryClient = useQueryClient()
   const [currentGen, setCurrentGen] = useState<Generation | null>(null)
@@ -24,11 +33,16 @@ export default function Dashboard({ session }: DashboardProps) {
   const [loadElapsed, setLoadElapsed] = useState(0)
   const [pendingGenParams, setPendingGenParams] = useState<{ steps: number; numRefImages: number } | null>(null)
   const [genKey, setGenKey] = useState(0)
-  const [queue, setQueue] = useState<Array<{ prompt: string; images?: string[]; options?: GenerationOptions }>>([])
+  const [pendingGenerations, setPendingGenerations] = useState<Record<string, PendingGeneration>>({})
   const [activeGenerations, setActiveGenerations] = useState<ActiveGeneration[]>([])
   const [globalStage, setGlobalStage] = useState('idle')
   const [isViewingActiveGeneration, setIsViewingActiveGeneration] = useState(false)
-  const isDraining = useRef(false)
+  const pendingGenerationCount = Object.keys(pendingGenerations).length
+  const optimisticPendingCount = Object.values(pendingGenerations).filter(pending =>
+    !activeGenerations.some(gen => gen.user_id === session.user.id && gen.prompt === pending.prompt)
+  ).length
+  const displayedGenerationCount = activeGenerations.length + optimisticPendingCount
+  const hasPendingGenerations = pendingGenerationCount > 0
 
   // Poll model health status
   const { data: modelStatus = 'offline' } = useQuery({
@@ -67,37 +81,9 @@ export default function Dashboard({ session }: DashboardProps) {
     select: (data) => data.filter((item: Generation) => item.image_path?.endsWith('.png') || item.public_url?.endsWith('.png'))
   })
 
-  // Generate Mutation
-  const generateMutation = useMutation({
-    mutationFn: ({ prompt, images, options }: { prompt: string; images?: string[]; options?: GenerationOptions }) => api.generateImage(prompt, session.user.id, images, options),
-    onMutate: (vars) => {
-      setCurrentGen(null)
-      setIsViewingActiveGeneration(true)
-      setGenKey((prev) => prev + 1)
-      setPendingGenParams({
-        steps: vars.options?.num_inference_steps ?? 50,
-        numRefImages: vars.images?.length ?? 0,
-      })
-    },
-    onSuccess: (newGen) => {
-      queryClient.setQueryData(['history', session.user.id], (old: Generation[] = []) => [newGen, ...old])
-      setCurrentGen(newGen)
-      setIsViewingActiveGeneration(false)
-      toast.success('Image generated successfully!')
-    },
-    onError: (error) => {
-      console.error(error)
-      setIsViewingActiveGeneration(false)
-      toast.error(error instanceof Error ? error.message : 'Failed to generate image')
-    },
-    onSettled: () => {
-      setPendingGenParams(null)
-    },
-  })
-
   // Poll active generations + global stage (only when relevant)
   useEffect(() => {
-    const shouldPoll = generateMutation.isPending || activeGenerations.length > 0
+    const shouldPoll = hasPendingGenerations || activeGenerations.length > 0
     if (!shouldPoll) {
       setGlobalStage('idle')
       return
@@ -112,28 +98,51 @@ export default function Dashboard({ session }: DashboardProps) {
       setGlobalStage(status.stage && status.stage !== 'idle' ? status.stage : 'idle')
     }, 3000)
     return () => clearInterval(poll)
-  }, [generateMutation.isPending, activeGenerations.length])
-
-  // Auto-drain queue
-  useEffect(() => {
-    if (!generateMutation.isPending && queue.length > 0 && !isDraining.current) {
-      isDraining.current = true
-      const next = queue[0]
-      setQueue(prev => prev.slice(1))
-      generateMutation.mutate({ prompt: next.prompt, images: next.images, options: next.options })
-      // Reset flag after mutation starts
-      requestAnimationFrame(() => { isDraining.current = false })
-    }
-  }, [generateMutation.isPending, queue])
+  }, [hasPendingGenerations, activeGenerations.length])
 
   const handleGenerate = useCallback((prompt: string, images?: string[], options?: GenerationOptions) => {
-    if (generateMutation.isPending) {
-      setQueue(prev => [...prev, { prompt, images, options }])
-      toast.info(`Queued (${queue.length + 1} pending)`)
-    } else {
-      generateMutation.mutate({ prompt, images, options })
+    if (displayedGenerationCount >= MAX_GLOBAL_GENERATIONS) {
+      toast.error('Global generation queue is full. Try again later.')
+      return
     }
-  }, [generateMutation, queue.length])
+
+    const id = typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2)
+    const startedAt = Date.now()
+
+    setPendingGenerations(prev => ({ ...prev, [id]: { prompt, images, options, startedAt } }))
+    setCurrentGen(null)
+    setIsViewingActiveGeneration(true)
+    setGenKey((prev) => prev + 1)
+    setPendingGenParams({
+      steps: options?.num_inference_steps ?? 50,
+      numRefImages: images?.length ?? 0,
+    })
+
+    void api.generateImage(prompt, session.user.id, images, options)
+      .then((newGen) => {
+        queryClient.setQueryData(['history', session.user.id], (old: Generation[] = []) => [newGen, ...old])
+        setCurrentGen(newGen)
+        setIsViewingActiveGeneration(false)
+        toast.success('Image generated successfully!')
+      })
+      .catch((error) => {
+        console.error(error)
+        setIsViewingActiveGeneration(false)
+        toast.error(error instanceof Error ? error.message : 'Failed to generate image')
+      })
+      .finally(() => {
+        setPendingGenerations(prev => {
+          const next = { ...prev }
+          delete next[id]
+          if (Object.keys(next).length === 0) {
+            setPendingGenParams(null)
+          }
+          return next
+        })
+      })
+  }, [displayedGenerationCount, queryClient, session.user.id])
 
   // Delete Mutation
   const deleteMutation = useMutation({
@@ -159,7 +168,7 @@ export default function Dashboard({ session }: DashboardProps) {
 
   const handleNewChat = () => {
     setCurrentGen(null)
-    setIsViewingActiveGeneration(generateMutation.isPending)
+    setIsViewingActiveGeneration(false)
   }
 
   const handleLoadModel = async () => {
@@ -214,14 +223,14 @@ export default function Dashboard({ session }: DashboardProps) {
              <ModelStatusBadge status={modelStatus} onLoad={handleLoadModel} onUnload={handleUnloadModel} progress={loadProgress} message={loadMessage} elapsed={loadElapsed} />
              <GenerationStageBadge
                key={`stage-${genKey}`}
-               isLoading={generateMutation.isPending}
+               isLoading={hasPendingGenerations}
                steps={pendingGenParams?.steps ?? 50}
                numRefImages={pendingGenParams?.numRefImages ?? 0}
              />
            </div>
            <ImageCanvas
              currentGeneration={currentGen}
-             isLoading={generateMutation.isPending}
+             isLoading={hasPendingGenerations}
              modelStatus={modelStatus}
              onGenerate={handleGenerate}
              pendingGenParams={pendingGenParams ?? undefined}
@@ -234,18 +243,19 @@ export default function Dashboard({ session }: DashboardProps) {
           <div className="shrink-0 w-full bg-background relative z-20">
             <PromptInput
               onGenerate={handleGenerate}
-              isLoading={generateMutation.isPending}
+              isLoading={hasPendingGenerations}
               isCentralized={false}
               initialPrompt={!isViewingActiveGeneration ? currentGen.prompt : undefined}
               initialImageUrl={!isViewingActiveGeneration ? currentGen.public_url : undefined}
               modelStatus={modelStatus}
-              queueLength={queue.length}
+              queueLength={Math.max(pendingGenerationCount - 1, 0)}
             />
           </div>
         )}
 
         <ActiveGenerationsIndicator
           activeGenerations={activeGenerations}
+          pendingGenerations={pendingGenerations}
           currentUserId={session.user.id}
           globalStage={globalStage}
           onFocusMyGen={handleFocusMyGen}

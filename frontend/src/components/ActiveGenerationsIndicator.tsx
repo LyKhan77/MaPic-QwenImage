@@ -5,6 +5,7 @@ import { cn } from '../lib/utils'
 
 interface ActiveGenerationsIndicatorProps {
   activeGenerations: ActiveGeneration[]
+  pendingGenerations: Record<string, { prompt: string; startedAt: number }>
   currentUserId: string
   globalStage: string
   onFocusMyGen: () => void
@@ -18,6 +19,7 @@ function formatElapsed(seconds: number): string {
 
 export default function ActiveGenerationsIndicator({
   activeGenerations,
+  pendingGenerations,
   currentUserId,
   globalStage,
   onFocusMyGen,
@@ -25,11 +27,23 @@ export default function ActiveGenerationsIndicator({
   const [isHovered, setIsHovered] = useState(false)
   const showHoverPanel = useCallback(() => setIsHovered(true), [])
   const hideHoverPanel = useCallback(() => setIsHovered(false), [])
+  const now = Date.now()
+  const optimisticGenerations: ActiveGeneration[] = Object.entries(pendingGenerations)
+    .filter(([, pending]) => !activeGenerations.some(gen =>
+      gen.user_id === currentUserId && gen.prompt === pending.prompt
+    ))
+    .map(([id, pending]) => ({
+      id,
+      user_id: currentUserId,
+      prompt: pending.prompt,
+      elapsed_seconds: Math.max(0, Math.floor((now - pending.startedAt) / 1000)),
+    }))
+  const displayedGenerations = [...activeGenerations, ...optimisticGenerations]
 
-  if (activeGenerations.length === 0) return null
+  if (displayedGenerations.length === 0) return null
 
-  const myGen = activeGenerations.find(g => g.user_id === currentUserId)
-  const otherGens = activeGenerations.filter(g => g.user_id !== currentUserId)
+  const myGens = displayedGenerations.filter(g => g.user_id === currentUserId)
+  const otherGens = displayedGenerations.filter(g => g.user_id !== currentUserId)
 
   return (
     <div
@@ -50,7 +64,7 @@ export default function ActiveGenerationsIndicator({
           <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
         </span>
         <span className="text-xs font-mono text-muted-foreground">
-          {activeGenerations.length} active
+          {displayedGenerations.length}/10 active
         </span>
       </motion.div>
 
@@ -72,8 +86,9 @@ export default function ActiveGenerationsIndicator({
 
             <div className="max-h-60 overflow-y-auto">
               {/* User's own generation */}
-              {myGen && (
+              {myGens.map((gen, index) => (
                 <button
+                  key={gen.id}
                   onClick={onFocusMyGen}
                   className="w-full text-left px-3 py-2.5 hover:bg-primary/10 transition-colors border-b border-border/20 cursor-pointer"
                 >
@@ -82,14 +97,16 @@ export default function ActiveGenerationsIndicator({
                       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
                       <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
                     </span>
-                    <span className="text-[10px] font-bold text-primary uppercase">You</span>
+                    <span className="text-[10px] font-bold text-primary uppercase">
+                      You {myGens.length > 1 ? `#${index + 1}` : ''}
+                    </span>
                   </div>
-                  <p className="text-xs font-medium text-foreground mt-1 line-clamp-1">{myGen.prompt}</p>
+                  <p className="text-xs font-medium text-foreground mt-1 line-clamp-1">{gen.prompt}</p>
                   <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
-                    {formatElapsed(myGen.elapsed_seconds)} · {globalStage || 'processing'}
+                    {formatElapsed(gen.elapsed_seconds)} · {globalStage || 'processing'}
                   </p>
                 </button>
-              )}
+              ))}
 
               {/* Other users' generations */}
               {otherGens.map(gen => (

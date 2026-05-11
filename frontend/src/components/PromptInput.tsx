@@ -114,7 +114,6 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
 
   const handleSubmit = () => {
     if (!prompt.trim() || !isModelReady) return
-    if (isLoading) return
 
     const cleanImages = images.length > 0
       ? images.map(img => img.base64.includes(',') ? img.base64.split(',')[1] : img.base64)
@@ -168,7 +167,7 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
           />
           <button
              onClick={() => fileInputRef.current?.click()}
-             disabled={isLoading || images.length >= 3 || !isModelReady}
+             disabled={images.length >= 3 || !isModelReady}
              className={`flex shrink-0 items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-10 w-10 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-2 text-muted-foreground hover:text-foreground'}`}
              title="Attach reference image (Max 3, 2MB each)"
           >
@@ -182,13 +181,13 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
             onKeyDown={handleKeyDown}
             onBlur={() => onTyping && onTyping(false)}
             placeholder={isCentralized ? "How can MaPic help you today?" : `Describe your imagination...`}
-            disabled={isLoading || !isModelReady}
+            disabled={!isModelReady}
             className={`flex-1 bg-transparent px-2 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50 ${isCentralized ? 'text-lg py-3 px-4' : ''}`}
           />
 
           <button
             onClick={() => setShowSettings(!showSettings)}
-            disabled={isLoading || !isModelReady}
+            disabled={!isModelReady}
             className={`shrink-0 flex items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-10 w-10 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-2 text-muted-foreground hover:text-foreground'} ${showSettings ? 'text-primary' : ''}`}
             title="Generation settings"
           >
