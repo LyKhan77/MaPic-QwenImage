@@ -20,6 +20,8 @@ export default function Dashboard({ session }: DashboardProps) {
   const [loadProgress, setLoadProgress] = useState(0)
   const [loadMessage, setLoadMessage] = useState('')
   const [loadElapsed, setLoadElapsed] = useState(0)
+  const [pendingGenParams, setPendingGenParams] = useState<{ steps: number; numRefImages: number } | null>(null)
+  const [genKey, setGenKey] = useState(0)
 
   // Poll model health status
   const { data: modelStatus = 'offline' } = useQuery({
@@ -61,8 +63,13 @@ export default function Dashboard({ session }: DashboardProps) {
   // Generate Mutation
   const generateMutation = useMutation({
     mutationFn: ({ prompt, images, options }: { prompt: string; images?: string[]; options?: GenerationOptions }) => api.generateImage(prompt, session.user.id, images, options),
-    onMutate: () => {
+    onMutate: (vars) => {
       setCurrentGen(null)
+      setGenKey((prev) => prev + 1)
+      setPendingGenParams({
+        steps: vars.options?.num_inference_steps ?? 50,
+        numRefImages: vars.images?.length ?? 0,
+      })
     },
     onSuccess: (newGen) => {
       queryClient.setQueryData(['history', session.user.id], (old: Generation[] = []) => [newGen, ...old])
@@ -72,7 +79,10 @@ export default function Dashboard({ session }: DashboardProps) {
     onError: (error) => {
       console.error(error)
       toast.error(error instanceof Error ? error.message : 'Failed to generate image')
-    }
+    },
+    onSettled: () => {
+      setPendingGenParams(null)
+    },
   })
 
   // Delete Mutation
@@ -151,6 +161,8 @@ export default function Dashboard({ session }: DashboardProps) {
              isLoading={generateMutation.isPending}
              modelStatus={modelStatus}
              onGenerate={(prompt, images, options) => generateMutation.mutate({ prompt, images, options })}
+             pendingGenParams={pendingGenParams ?? undefined}
+             genKey={genKey}
            />
         </div>
 

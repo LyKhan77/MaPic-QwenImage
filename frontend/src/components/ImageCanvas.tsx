@@ -9,15 +9,18 @@ import PromptInput from './PromptInput'
 import type { GenerationOptions } from './PromptInput'
 import { useState } from 'react'
 import { useGenerationStatus } from '../hooks/useGenerationStatus'
+import GenerationTimeDisplay from './GenerationTimeDisplay'
 
 interface ImageCanvasProps {
   currentGeneration: Generation | null
   isLoading: boolean
   modelStatus: ModelStatus
   onGenerate: (prompt: string, images?: string[], options?: GenerationOptions) => void
+  pendingGenParams?: { steps: number; numRefImages: number }
+  genKey?: number
 }
 
-export default function ImageCanvas({ currentGeneration, isLoading, modelStatus, onGenerate }: ImageCanvasProps) {
+export default function ImageCanvas({ currentGeneration, isLoading, modelStatus, onGenerate, pendingGenParams, genKey }: ImageCanvasProps) {
   const [isTyping, setIsTyping] = useState(false)
   const generationStatus = useGenerationStatus(isLoading)
 
@@ -124,6 +127,14 @@ export default function ImageCanvas({ currentGeneration, isLoading, modelStatus,
                   )}
                 </AnimatePresence>
               </p>
+              {modelStatus === 'ready' && (
+                <GenerationTimeDisplay
+                  key={genKey}
+                  isLoading={isLoading}
+                  steps={pendingGenParams?.steps ?? 50}
+                  numRefImages={pendingGenParams?.numRefImages ?? 0}
+                />
+              )}
             </motion.div>
           ) : currentGeneration ? (
             <motion.div 
