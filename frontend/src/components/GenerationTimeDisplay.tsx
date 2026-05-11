@@ -48,7 +48,7 @@ export default function GenerationTimeDisplay({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -4 }}
       transition={{ duration: 0.3, delay: 0.1 }}
-      className="mt-2 flex items-center gap-1.5 font-mono text-xs text-muted-foreground tabular-nums tracking-wide"
+      className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground/70 tabular-nums tracking-wide"
     >
       <span>{formatTime(elapsed)} elapsed</span>
       <span className="opacity-40">/</span>
