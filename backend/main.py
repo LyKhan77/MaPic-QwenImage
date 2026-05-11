@@ -51,7 +51,12 @@ if not _logging_configured:
     _logging_configured = True
 
 # In-memory tracking of active generations
+MAX_GLOBAL_GENERATIONS = 10
 _active_generations: dict[str, dict] = {}
+
+
+def _can_accept_generation(active_generations: dict[str, dict]) -> bool:
+    return len(active_generations) < MAX_GLOBAL_GENERATIONS
 
 origins = [origin.strip() for origin in CORS_ORIGINS.split(",") if origin.strip()]
 
@@ -118,6 +123,12 @@ async def api_active_generations():
 
 @app.post("/api/generate", response_model=Generation)
 async def generate(payload: GenerateRequest):
+    if not _can_accept_generation(_active_generations):
+        raise HTTPException(
+            status_code=429,
+            detail="Global generation queue is full. Try again later.",
+        )
+
     gen_id = str(uuid4())
     _active_generations[gen_id] = {
         "user_id": payload.user_id,

@@ -230,14 +230,14 @@ export default function Dashboard({ session }: DashboardProps) {
            />
         </div>
 
-        {currentGen && (
+        {(currentGen || generateMutation.isPending) && (
           <div className="shrink-0 w-full bg-background relative z-20">
             <PromptInput
               onGenerate={handleGenerate}
               isLoading={generateMutation.isPending}
               isCentralized={false}
-              initialPrompt={currentGen.prompt}
-              initialImageUrl={currentGen.public_url}
+              initialPrompt={currentGen && !isViewingActiveGeneration ? currentGen.prompt : undefined}
+              initialImageUrl={currentGen && !isViewingActiveGeneration ? currentGen.public_url : undefined}
               modelStatus={modelStatus}
               queueLength={queue.length}
             />
