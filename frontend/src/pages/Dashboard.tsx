@@ -27,6 +27,7 @@ export default function Dashboard({ session }: DashboardProps) {
   const [queue, setQueue] = useState<Array<{ prompt: string; images?: string[]; options?: GenerationOptions }>>([])
   const [activeGenerations, setActiveGenerations] = useState<ActiveGeneration[]>([])
   const [globalStage, setGlobalStage] = useState('idle')
+  const [isViewingActiveGeneration, setIsViewingActiveGeneration] = useState(false)
   const isDraining = useRef(false)
 
   // Poll model health status
@@ -71,6 +72,7 @@ export default function Dashboard({ session }: DashboardProps) {
     mutationFn: ({ prompt, images, options }: { prompt: string; images?: string[]; options?: GenerationOptions }) => api.generateImage(prompt, session.user.id, images, options),
     onMutate: (vars) => {
       setCurrentGen(null)
+      setIsViewingActiveGeneration(true)
       setGenKey((prev) => prev + 1)
       setPendingGenParams({
         steps: vars.options?.num_inference_steps ?? 50,
@@ -80,10 +82,12 @@ export default function Dashboard({ session }: DashboardProps) {
     onSuccess: (newGen) => {
       queryClient.setQueryData(['history', session.user.id], (old: Generation[] = []) => [newGen, ...old])
       setCurrentGen(newGen)
+      setIsViewingActiveGeneration(false)
       toast.success('Image generated successfully!')
     },
     onError: (error) => {
       console.error(error)
+      setIsViewingActiveGeneration(false)
       toast.error(error instanceof Error ? error.message : 'Failed to generate image')
     },
     onSettled: () => {
@@ -150,10 +154,12 @@ export default function Dashboard({ session }: DashboardProps) {
 
   const handleSelectHistory = (gen: Generation) => {
     setCurrentGen(gen)
+    setIsViewingActiveGeneration(false)
   }
 
   const handleNewChat = () => {
     setCurrentGen(null)
+    setIsViewingActiveGeneration(false)
   }
 
   const handleLoadModel = async () => {
@@ -186,6 +192,7 @@ export default function Dashboard({ session }: DashboardProps) {
 
   const handleFocusMyGen = useCallback(() => {
     setCurrentGen(null)
+    setIsViewingActiveGeneration(true)
   }, [])
 
   return (
@@ -219,6 +226,7 @@ export default function Dashboard({ session }: DashboardProps) {
              onGenerate={handleGenerate}
              pendingGenParams={pendingGenParams ?? undefined}
              genKey={genKey}
+             isViewingActiveGeneration={isViewingActiveGeneration}
            />
         </div>
 

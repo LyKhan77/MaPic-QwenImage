@@ -18,9 +18,10 @@ interface ImageCanvasProps {
   onGenerate: (prompt: string, images?: string[], options?: GenerationOptions) => void
   pendingGenParams?: { steps: number; numRefImages: number }
   genKey?: number
+  isViewingActiveGeneration?: boolean
 }
 
-export default function ImageCanvas({ currentGeneration, isLoading, modelStatus, onGenerate, pendingGenParams, genKey }: ImageCanvasProps) {
+export default function ImageCanvas({ currentGeneration, isLoading, modelStatus, onGenerate, pendingGenParams, genKey, isViewingActiveGeneration = true }: ImageCanvasProps) {
   const [isTyping, setIsTyping] = useState(false)
   const generationStatus = useGenerationStatus(isLoading)
 
@@ -78,7 +79,7 @@ export default function ImageCanvas({ currentGeneration, isLoading, modelStatus,
       {/* Content */}
       <div className="relative z-10 flex h-full w-full flex-col items-center justify-center">
         <AnimatePresence mode="wait">
-          {isLoading && !currentGeneration ? (
+          {isLoading && !currentGeneration && isViewingActiveGeneration ? (
             <motion.div 
               key="loading"
               initial={{ opacity: 0 }}
