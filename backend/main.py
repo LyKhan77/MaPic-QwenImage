@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 try:
     from backend.config import CORS_ORIGINS, GLM_IMAGE_API_URL
     from backend.schemas import GenerateRequest, Generation
-    from backend.services.glm_image_service import GlmImageError, generate_image_bytes, get_health_status, load_model, unload_model, stream_load_model
+    from backend.services.glm_image_service import GlmImageError, generate_image_bytes, get_generation_status, get_health_status, load_model, unload_model, stream_load_model
     from backend.services.supabase_service import (
         SupabaseError,
         fetch_history,
@@ -21,7 +21,7 @@ try:
 except ModuleNotFoundError:
     from config import CORS_ORIGINS, GLM_IMAGE_API_URL
     from schemas import GenerateRequest, Generation
-    from services.glm_image_service import GlmImageError, generate_image_bytes, get_health_status, load_model, unload_model, stream_load_model
+    from services.glm_image_service import GlmImageError, generate_image_bytes, get_generation_status, get_health_status, load_model, unload_model, stream_load_model
     from services.supabase_service import (
         SupabaseError,
         fetch_history,
@@ -71,6 +71,15 @@ async def api_unload():
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/generations/status")
+async def api_generation_status():
+    try:
+        return await get_generation_status()
+    except Exception as exc:
+        logger.warning("Generation status failed: %s", exc)
+        return {"stage": "idle", "step": 0, "total_steps": 0}
 
 
 @app.post("/api/generate", response_model=Generation)

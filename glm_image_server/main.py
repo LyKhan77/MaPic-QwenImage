@@ -5,6 +5,7 @@ import io
 import logging
 import math
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -33,6 +34,26 @@ logger = logging.getLogger("glm_image_server")
 pipe: GlmImagePipeline | None = None
 _executor = ThreadPoolExecutor(max_workers=1)
 _inference_lock = asyncio.Lock()
+
+# Thread-safe generation state for stage tracking
+_gen_state = {"stage": "idle", "step": 0, "total_steps": 0}
+_gen_lock = threading.Lock()
+
+STAGE_NAMES = ["warmup", "encoding", "ar_sampling", "diffusion", "decoding"]
+
+def update_gen_state(stage: str, step: int = 0, total_steps: int = 0):
+    with _gen_lock:
+        _gen_state.update({"stage": stage, "step": step, "total_steps": total_steps})
+
+def get_gen_state():
+    with _gen_lock:
+        return dict(_gen_state)
+
+def make_diffusion_callback(total_steps: int):
+    def callback(pipeline, step_index, t, callback_kwargs):
+        update_gen_state("diffusion", step=step_index + 1, total_steps=total_steps)
+        return callback_kwargs
+    return callback
 
 # GPU indices as seen by PyTorch (verified 2026-05-06):
 #   GPU 0 = RTX 4090 (24 GB, Ada Lovelace)
@@ -331,6 +352,11 @@ async def api_unload_model():
     return {"status": "unloaded"}
 
 
+@app.get("/v1/generations/status")
+async def generation_status():
+    return get_gen_state()
+
+
 @app.post("/v1/images/generations")
 async def text_to_image(req: T2IRequest):
     async with _inference_lock:
@@ -341,15 +367,25 @@ async def text_to_image(req: T2IRequest):
 
         width, height = _snap_to_32(req.size)
         logger.info("T2I: prompt=%r size=%dx%d", req.prompt[:80], width, height)
-        result = await _run_inference(
-            lambda: pipe(
+        update_gen_state("warmup")
+
+        def run():
+            update_gen_state("encoding")
+            update_gen_state("diffusion")
+            result = pipe(
                 prompt=req.prompt,
                 width=width,
                 height=height,
                 num_inference_steps=req.num_inference_steps,
                 guidance_scale=req.guidance_scale,
+                callback_on_step_end=make_diffusion_callback(req.num_inference_steps),
+                callback_on_step_end_tensor_inputs=["latents"],
             )
-        )
+            update_gen_state("decoding")
+            return result
+
+        result = await _run_inference(run)
+        update_gen_state("idle")
         img: Image.Image = result.images[0]
         b64 = _pil_to_b64(img)
         return {"data": [{"b64_json": b64}]}
@@ -367,16 +403,26 @@ async def image_to_image(req: I2IRequest):
         ref_images = [_b64_to_pil(b).convert("RGB") for b in req.images]
         ref_images = [img.resize((width, height), Image.LANCZOS) for img in ref_images]
         logger.info("I2I: prompt=%r refs=%d size=%dx%d", req.prompt[:80], len(ref_images), width, height)
-        result = await _run_inference(
-            lambda: pipe(
+        update_gen_state("warmup")
+
+        def run():
+            update_gen_state("encoding")
+            update_gen_state("diffusion")
+            result = pipe(
                 prompt=req.prompt,
                 image=ref_images,
                 height=height,
                 width=width,
                 num_inference_steps=req.num_inference_steps,
                 guidance_scale=req.guidance_scale,
+                callback_on_step_end=make_diffusion_callback(req.num_inference_steps),
+                callback_on_step_end_tensor_inputs=["latents"],
             )
-        )
+            update_gen_state("decoding")
+            return result
+
+        result = await _run_inference(run)
+        update_gen_state("idle")
         img: Image.Image = result.images[0]
         b64 = _pil_to_b64(img)
         return {"data": [{"b64_json": b64}]}

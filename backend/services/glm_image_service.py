@@ -56,6 +56,18 @@ async def unload_model() -> dict:
         return resp.json()
 
 
+async def get_generation_status() -> dict:
+    url = GLM_IMAGE_API_URL.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{url}/v1/generations/status")
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.warning("Generation status check failed: %s", exc)
+        return {"stage": "idle", "step": 0, "total_steps": 0}
+
+
 async def generate_image_bytes(prompt: str, images: list[str] | None = None, num_inference_steps: int = 50, guidance_scale: float = 1.5) -> bytes:
     url = GLM_IMAGE_API_URL.rstrip("/")
 

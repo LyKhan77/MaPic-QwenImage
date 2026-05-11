@@ -93,5 +93,15 @@ export const api = {
     })
     if (!res.ok) throw new Error('Failed to delete item')
     return res.json()
+  },
+
+  async getGenerationStatus(): Promise<{ stage: string; step: number; total_steps: number }> {
+    try {
+      const res = await fetch(`${API_URL}/generations/status`)
+      if (!res.ok) return { stage: 'idle', step: 0, total_steps: 0 }
+      return res.json()
+    } catch {
+      return { stage: 'idle', step: 0, total_steps: 0 }
+    }
   }
 }

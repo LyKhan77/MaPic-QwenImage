@@ -6,6 +6,7 @@ import Sidebar from '../components/Sidebar'
 import ImageCanvas from '../components/ImageCanvas'
 import PromptInput from '../components/PromptInput'
 import ModelStatusBadge from '../components/ModelStatusBadge'
+import GenerationStageBadge from '../components/GenerationStageBadge'
 import type { Generation } from '../types'
 import type { GenerationOptions } from '../components/PromptInput'
 import { Toaster, toast } from 'sonner'
@@ -153,8 +154,14 @@ export default function Dashboard({ session }: DashboardProps) {
 
       <main className="flex flex-1 flex-col relative min-w-0 min-h-0">
         <div className="flex-1 relative min-h-0 flex flex-col">
-           <div className="absolute top-4 right-6 z-50">
+           <div className="absolute top-4 right-6 z-50 flex flex-col items-end gap-2">
              <ModelStatusBadge status={modelStatus} onLoad={handleLoadModel} onUnload={handleUnloadModel} progress={loadProgress} message={loadMessage} elapsed={loadElapsed} />
+             <GenerationStageBadge
+               key={`stage-${genKey}`}
+               isLoading={generateMutation.isPending}
+               steps={pendingGenParams?.steps ?? 50}
+               numRefImages={pendingGenParams?.numRefImages ?? 0}
+             />
            </div>
            <ImageCanvas
              currentGeneration={currentGen}
