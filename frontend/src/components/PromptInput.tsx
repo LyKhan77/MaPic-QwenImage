@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent, useRef, useEffect } from 'react'
-import { Send, Paperclip, X, ChevronDown, Settings2 } from 'lucide-react'
+import { Send, Paperclip, X, ChevronDown, Settings2, Info } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ModelStatus } from '../lib/api'
 
@@ -58,6 +58,15 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
       setImages([])
     }
   }, [initialPrompt, initialImageUrl])
+
+  useEffect(() => {
+    if (!showSettings) return
+    const handleEsc = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') setShowSettings(false)
+    }
+    window.addEventListener('keydown', handleEsc)
+    return () => window.removeEventListener('keydown', handleEsc)
+  }, [showSettings])
 
   const handleChange = (val: string) => {
     setPrompt(val)
@@ -230,44 +239,84 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
           </div>
         )}
 
-        {/* Settings Panel */}
+        {/* Settings Modal */}
         <AnimatePresence>
           {showSettings && (
             <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="fixed inset-0 z-50 flex items-center justify-center"
+              onClick={() => setShowSettings(false)}
             >
-              <div className={`mt-2 border border-border rounded-lg bg-card/40 p-3 space-y-3 ${isCentralized ? 'max-w-md mx-auto' : ''}`}>
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-mono text-muted-foreground">Steps</label>
-                  <span className="text-xs font-mono text-foreground tabular-nums">{steps}</span>
+              <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ duration: 0.2 }}
+                className="relative z-10 w-full max-w-sm mx-4 rounded-xl border border-border bg-card/95 backdrop-blur-md p-5 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="text-sm font-bold tracking-tight">Generation Settings</h3>
+                  <button
+                    onClick={() => setShowSettings(false)}
+                    className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                  >
+                    <X size={16} />
+                  </button>
                 </div>
-                <input
-                  type="range"
-                  min={20}
-                  max={75}
-                  step={5}
-                  value={steps}
-                  onChange={(e) => setSteps(Number(e.target.value))}
-                  className="w-full h-1 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
-                />
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-mono text-muted-foreground">Guidance</label>
-                  <span className="text-xs font-mono text-foreground tabular-nums">{guidance.toFixed(1)}</span>
+
+                <div className="space-y-5">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 group relative">
+                        <label className="text-xs font-mono text-muted-foreground">Steps</label>
+                        <Info size={13} className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors" />
+                        <div className="absolute left-0 bottom-full mb-2 w-56 bg-popover text-popover-foreground text-[11px] leading-relaxed rounded-md px-2.5 py-2 shadow-lg border border-border z-20 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 translate-y-1 group-hover:translate-y-0">
+                          Number of denoising iterations. More steps yield finer detail but take longer.
+                          <div className="absolute left-4 top-full -mt-px w-2 h-2 bg-popover border-r border-b border-border rotate-45" />
+                        </div>
+                      </div>
+                      <span className="text-xs font-mono text-foreground tabular-nums">{steps}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={20}
+                      max={75}
+                      step={5}
+                      value={steps}
+                      onChange={(e) => setSteps(Number(e.target.value))}
+                      className="w-full h-1 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 group relative">
+                        <label className="text-xs font-mono text-muted-foreground">Guidance</label>
+                        <Info size={13} className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors" />
+                        <div className="absolute left-0 bottom-full mb-2 w-56 bg-popover text-popover-foreground text-[11px] leading-relaxed rounded-md px-2.5 py-2 shadow-lg border border-border z-20 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 translate-y-1 group-hover:translate-y-0">
+                          How strongly the output follows your prompt. Higher values = stricter adherence.
+                          <div className="absolute left-4 top-full -mt-px w-2 h-2 bg-popover border-r border-b border-border rotate-45" />
+                        </div>
+                      </div>
+                      <span className="text-xs font-mono text-foreground tabular-nums">{guidance.toFixed(1)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1.0}
+                      max={5.0}
+                      step={0.1}
+                      value={guidance}
+                      onChange={(e) => setGuidance(Number(e.target.value))}
+                      className="w-full h-1 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
+                    />
+                  </div>
                 </div>
-                <input
-                  type="range"
-                  min={1.0}
-                  max={5.0}
-                  step={0.1}
-                  value={guidance}
-                  onChange={(e) => setGuidance(Number(e.target.value))}
-                  className="w-full h-1 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
-                />
-              </div>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
