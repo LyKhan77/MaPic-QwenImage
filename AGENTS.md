@@ -28,7 +28,7 @@ project references :
 - **Est. VRAM peak:** GPU 0: 14-16 GB | GPU 1 & 2: 10-12 GB | Supports up to 2048x2048
 - **Inference server:** `glm_image_server/main.py` — thread pool executor, inference lock, no idle unload
 - **Concurrency:** asyncio.Lock ensures 1 inference at a time; `run_in_executor` keeps event loop responsive
-- **Generation queue:** Frontend queue auto-drains when prior generation completes. Prompt input remains editable while generating, and the button switches to "Queue (N)" when a generation is already running.
+- **Generation loading UX:** Loading screen is read-only; prompt input appears before submit and again on generated result pages, but not while generation is in progress.
 - **Global generation capacity:** Backend rejects new `/api/generate` requests with HTTP 429 when 10 active/accepted generation jobs are already in memory across all users.
 - **Active generations indicator:** Bottom-right floating pill (`ActiveGenerationsIndicator`) shows all in-flight generations across users. User's own entry is clickable to refocus the canvas; others are view-only.
 - **Backend active tracking:** `GET /api/generations/active` returns in-memory tracked jobs with elapsed time.

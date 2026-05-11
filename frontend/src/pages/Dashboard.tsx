@@ -159,7 +159,7 @@ export default function Dashboard({ session }: DashboardProps) {
 
   const handleNewChat = () => {
     setCurrentGen(null)
-    setIsViewingActiveGeneration(false)
+    setIsViewingActiveGeneration(generateMutation.isPending)
   }
 
   const handleLoadModel = async () => {
@@ -230,14 +230,14 @@ export default function Dashboard({ session }: DashboardProps) {
            />
         </div>
 
-        {(currentGen || generateMutation.isPending) && (
+        {currentGen && (
           <div className="shrink-0 w-full bg-background relative z-20">
             <PromptInput
               onGenerate={handleGenerate}
               isLoading={generateMutation.isPending}
               isCentralized={false}
-              initialPrompt={currentGen && !isViewingActiveGeneration ? currentGen.prompt : undefined}
-              initialImageUrl={currentGen && !isViewingActiveGeneration ? currentGen.public_url : undefined}
+              initialPrompt={!isViewingActiveGeneration ? currentGen.prompt : undefined}
+              initialImageUrl={!isViewingActiveGeneration ? currentGen.public_url : undefined}
               modelStatus={modelStatus}
               queueLength={queue.length}
             />

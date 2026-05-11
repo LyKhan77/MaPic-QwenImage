@@ -13,8 +13,8 @@ MaPic turns text prompts and reference images into production-quality visuals â€
 *   **VRAM Optimization (Soft Unload):** Automatically unloads the model from GPU VRAM after 1 hour of inactivity to save resources. Supports manual **Load/Unload** directly from the UI status badge.
 *   **On-Demand Loading:** Automatically reloads the model when a new generation request is made, ensuring a seamless experience even after the model has been idle.
 *   **History Management:** Automatically saves generated images and prompts. View, select, and delete history items.
-*   **Generation Queue:** Submit another prompt while an image is generating; MaPic queues it and runs it after the active generation completes.
-*   **Global Capacity Limit:** Backend accepts up to 10 active or queued generation requests across all users.
+*   **Read-Only Loading Screen:** The canvas stays focused on generation progress after submit and does not show prompt inputs until the result is ready.
+*   **Global Capacity Limit:** Backend accepts up to 10 active generation requests across all users.
 *   **Responsive Design:** Collapsible sidebar and mobile-friendly layout.
 *   **Secure Auth:** Google OAuth 2.0 via Supabase Authentication.
 *   **Share & Download:** Easily download images or copy direct links to the clipboard.
@@ -136,11 +136,12 @@ cd frontend && npm run dev
 2.  Use the **Prompt Input** at the bottom to describe the image you want.
 3.  Attach reference images (up to 3, max 2MB each) via the paperclip button.
 4.  Click **Generate** or press Enter.
-5.  While an image is generating, use **New Generation** or the bottom prompt input to submit more prompts into the queue.
+5.  Wait on the read-only loading screen while the image is generated.
 6.  View your creation in the main canvas.
-7.  Use the **Sidebar** to access previous generations or switch themes.
+7.  Use the bottom prompt input on the result page to start another generation.
+8.  Use the **Sidebar** to access previous generations or switch themes.
 
-MaPic accepts a maximum of 10 active or queued generations globally across all users. When the queue is full, new requests are rejected with a clear retry-later message.
+MaPic accepts a maximum of 10 active generation requests globally across all users. When capacity is full, new requests are rejected with a clear retry-later message.
 
 ## âš¡ Creator
 
