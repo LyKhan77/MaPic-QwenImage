@@ -19,4 +19,4 @@ SUPABASE_SERVICE_ROLE_KEY = _get_env("SUPABASE_SERVICE_ROLE_KEY", required=True)
 GLM_IMAGE_API_URL = _get_env("GLM_IMAGE_API_URL", "http://localhost:30000")
 MODEL_NAME = "glm-image"
 
-CORS_ORIGINS = _get_env("CORS_ORIGINS", "http://localhost:5151,http://localhost:5152,http://127.0.0.1:5151,http://127.0.0.1:5152,https://frontend-one-mu-qq21mhpswl.vercel.app")
+CORS_ORIGINS = _get_env("CORS_ORIGINS", "http://localhost:5151,http://localhost:5152,http://127.0.0.1:5151,http://127.0.0.1:5152,https://mapic-glm.vercel.app")
