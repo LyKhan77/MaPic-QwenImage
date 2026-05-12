@@ -50,8 +50,15 @@ def get_gen_state():
         return dict(_gen_state)
 
 def make_diffusion_callback(total_steps: int):
+    first_call = True
+
     def callback(pipeline, step_index, t, callback_kwargs):
-        update_gen_state("diffusion", step=step_index + 1, total_steps=total_steps)
+        nonlocal first_call
+        if first_call:
+            update_gen_state("ar_sampling", step=0, total_steps=total_steps)
+            first_call = False
+        stage = "ar_sampling" if step_index < total_steps * 0.4 else "diffusion"
+        update_gen_state(stage, step=step_index + 1, total_steps=total_steps)
         return callback_kwargs
     return callback
 
@@ -362,6 +369,39 @@ async def api_unload_model():
     return {"status": "unloaded"}
 
 
+LOAD_SEGMENTS = [
+    {"key": "preflight", "label": "Pre-flight checks", "range": (0, 14)},
+    {"key": "weights", "label": "Loading weights", "range": (15, 79)},
+    {"key": "optimize", "label": "Optimizations", "range": (80, 94)},
+    {"key": "finalize", "label": "Finalizing", "range": (95, 100)},
+]
+
+
+@app.get("/v1/system/load/state")
+async def api_load_state():
+    if is_loading:
+        seg_index = 0
+        seg_progress = 0.0
+        for i, seg in enumerate(LOAD_SEGMENTS):
+            lo, hi = seg["range"]
+            if loading_progress >= lo:
+                seg_index = i
+                if loading_progress <= hi:
+                    seg_progress = (loading_progress - lo) / max(1, hi - lo)
+        return {
+            "status": "loading",
+            "segment_index": seg_index,
+            "segment_progress": round(seg_progress, 2),
+            "progress": loading_progress,
+            "message": loading_message,
+        }
+    if pipe is not None and not is_unloaded:
+        return {"status": "ready", "segment_index": 4, "segment_progress": 1.0, "progress": 100, "message": "Ready."}
+    if is_unloaded:
+        return {"status": "unloaded", "segment_index": 0, "segment_progress": 0.0, "progress": 0, "message": ""}
+    return {"status": "loading", "segment_index": 0, "segment_progress": 0.0, "progress": 0, "message": "Starting..."}
+
+
 @app.get("/v1/generations/status")
 async def generation_status():
     return get_gen_state()
@@ -381,7 +421,6 @@ async def text_to_image(req: T2IRequest):
 
         def run():
             update_gen_state("encoding")
-            update_gen_state("diffusion")
             result = pipe(
                 prompt=req.prompt,
                 width=width,
@@ -417,7 +456,6 @@ async def image_to_image(req: I2IRequest):
 
         def run():
             update_gen_state("encoding")
-            update_gen_state("diffusion")
             result = pipe(
                 prompt=req.prompt,
                 image=ref_images,

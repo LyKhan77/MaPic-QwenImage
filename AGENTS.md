@@ -32,6 +32,9 @@ project references :
 - **Global generation capacity:** Backend rejects new `/api/generate` requests with HTTP 429 when 10 active/accepted generation jobs are already in memory across all users.
 - **Active generations indicator:** Bottom-right floating pill (`ActiveGenerationsIndicator`) polls global active jobs for every user, shows all in-flight generations across users, includes multiple jobs per user and a `/10` global capacity count, and rehydrates the current user's active generation view after refresh. User's own entries are clickable to refocus the canvas; others are view-only. Queued jobs show `queued` instead of a running timer.
 - **Backend active tracking:** `GET /api/generations/active` returns in-memory tracked jobs with `queued` / `running` / `saving` status, elapsed time, inference step count, and reference image count. Generation elapsed time starts only after a job acquires the backend generation lock and begins the GLM request.
+- **Model status badge (segment-based):** 4-segment pipeline (Pre-flight → Weights → Optimize → Finalize) replaces circular progress ring. Segment progress persisted via `GET /v1/system/load/state` (GLM-Image) → `GET /api/load/state` (backend proxy). Frontend recovers loading state on page refresh.
+- **Inference stage tracking:** `warmup → encoding → ar_sampling → diffusion → decoding` — `ar_sampling` and `diffusion` stages reported by step callback (first 40% = AR, rest = diffusion). No more instant stage transitions.
+- **Shared generation util:** `estimateTotalSeconds()` extracted to `frontend/src/lib/generation.ts` — used by both `GenerationStageBadge` and `GenerationTimeDisplay`.
 - **Configurable generation params:** `num_inference_steps` (20-75, default 50 T2I / 35 I2I), `guidance_scale` (1.0-5.0, default 1.5) — exposed via frontend UI sliders
 - **torch.compile:** Transformer compiled with `reduce-overhead` mode for ~2-4x diffusion speedup
 - **Optimizations:** VAE slicing + tiling, attention slicing (transformer), Flash SDP + mem-efficient SDP, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128`
@@ -44,7 +47,7 @@ project references :
 | File | Role |
 |------|------|
 | `glm_image_server/main.py` | Inference server (T2I + I2I, thread pool, 3-GPU bf16, role-based pinning) |
-| `backend/services/glm_image_service.py` | Backend service layer (retry logic, 4hr timeout) |
+| `backend/services/glm_image_service.py` | Backend service layer (retry logic, 4hr timeout, load state proxy) |
 | `backend/config.py` | `GLM_IMAGE_API_URL` (default localhost:30000) |
 | `start-app.sh` | Starts all 3 services (exports `PYTORCH_CUDA_ALLOC_CONF`) |
 

@@ -32,12 +32,15 @@ project references :
 - **Generation queue:** Frontend queue auto-drains when prior generation completes. Button switches to "Queue (N)" when a generation is already running.
 - **Active generations indicator:** Bottom-right floating pill (`ActiveGenerationsIndicator`) shows all in-flight generations across users. User's own entry is clickable to refocus the canvas; others are view-only.
 - **Backend active tracking:** `GET /api/generations/active` returns in-memory tracked jobs with elapsed time.
+- **Model status badge (segment-based):** 4-segment pipeline (Pre-flight → Weights → Optimize → Finalize) replaces circular progress ring. Segment progress persisted via `GET /v1/system/load/state` (GLM-Image) → `GET /api/load/state` (backend proxy). Frontend recovers loading state on page refresh.
+- **Inference stage tracking:** `warmup → encoding → ar_sampling → diffusion → decoding` — `ar_sampling` and `diffusion` stages reported by step callback (first 40% = AR, rest = diffusion). No more instant stage transitions.
+- **Shared generation util:** `estimateTotalSeconds()` extracted to `frontend/src/lib/generation.ts` — used by both `GenerationStageBadge` and `GenerationTimeDisplay`.
 
 ### Key Files
 | File | Role |
 |------|------|
 | `glm_image_server/main.py` | Inference server (T2I + I2I, thread pool, 3-GPU bf16, torch.compile, VAE on GPU 2) |
-| `backend/services/glm_image_service.py` | Backend service layer (retry logic, 4hr timeout) |
+| `backend/services/glm_image_service.py` | Backend service layer (retry logic, 4hr timeout, load state proxy) |
 | `backend/config.py` | `GLM_IMAGE_API_URL` (default localhost:30000) |
 | `start-app.sh` | Starts all 3 services (exports `PYTORCH_CUDA_ALLOC_CONF`) |
 

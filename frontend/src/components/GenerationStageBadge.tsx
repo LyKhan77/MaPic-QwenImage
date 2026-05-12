@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { api } from '../lib/api'
 
@@ -21,29 +21,6 @@ const STAGES: StageInfo[] = [
   { key: 'decoding', label: 'VAE decoding' },
 ]
 
-const TIME_SLICES = [
-  { key: 'warmup', end: 0.10 },
-  { key: 'encoding', end: 0.25 },
-  { key: 'ar_sampling', end: 0.40 },
-  { key: 'diffusion', end: 0.90 },
-  { key: 'decoding', end: 1.00 },
-]
-
-function estimateTotalSeconds(steps: number, numRefImages: number): number {
-  const base = 45
-  const diffusion = steps * 4.5
-  const i2iOverhead = numRefImages > 0 ? 25 + numRefImages * 15 : 0
-  return Math.round(base + diffusion + i2iOverhead)
-}
-
-function getSimulatedStage(elapsed: number, total: number): string {
-  const progress = total > 0 ? elapsed / total : 0
-  for (const slice of TIME_SLICES) {
-    if (progress <= slice.end) return slice.key
-  }
-  return 'decoding'
-}
-
 export default function GenerationStageBadge({
   isLoading,
   steps,
@@ -51,11 +28,6 @@ export default function GenerationStageBadge({
 }: GenerationStageBadgeProps) {
   const [elapsed, setElapsed] = useState(0)
   const [backendStage, setBackendStage] = useState('idle')
-
-  const estimatedTotal = useMemo(
-    () => estimateTotalSeconds(steps, numRefImages),
-    [steps, numRefImages]
-  )
 
   useEffect(() => {
     if (!isLoading) return
@@ -83,8 +55,7 @@ export default function GenerationStageBadge({
 
   if (!isLoading) return null
 
-  const activeStage =
-    backendStage !== 'idle' ? backendStage : getSimulatedStage(elapsed, estimatedTotal)
+  const activeStage = backendStage !== 'idle' ? backendStage : 'warmup'
 
   const activeIndex = STAGES.findIndex((s) => s.key === activeStage)
 

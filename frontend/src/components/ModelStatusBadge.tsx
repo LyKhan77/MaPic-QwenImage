@@ -1,88 +1,136 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { Power, Play } from 'lucide-react'
+import { Power, Play, RefreshCw } from 'lucide-react'
 import type { ModelStatus } from '../lib/api'
 
 interface ModelStatusBadgeProps {
   status: ModelStatus
   onLoad?: () => void
   onUnload?: () => void
-  progress?: number
+  segmentIndex?: number
+  segmentProgress?: number
   message?: string
   elapsed?: number
 }
 
-const statusConfig: Record<ModelStatus, { label: string; color: string; pulse: boolean }> = {
-  ready: { label: 'READY', color: 'bg-emerald-400 shadow-emerald-400/50', pulse: false },
-  loading: { label: 'LOADING', color: 'bg-amber-400 shadow-amber-400/50', pulse: true },
-  offline: { label: 'OFFLINE', color: 'bg-red-400 shadow-red-400/50', pulse: true },
-  unloaded: { label: 'IDLE', color: 'bg-gray-400 shadow-gray-400/50', pulse: false },
-}
+const SEGMENTS = [
+  { key: 'preflight', label: 'Pre-flight' },
+  { key: 'weights', label: 'Weights' },
+  { key: 'optimize', label: 'Optimize' },
+  { key: 'finalize', label: 'Finalize' },
+]
 
-export default function ModelStatusBadge({ status, onLoad, onUnload, progress = 0, message = '', elapsed = 0 }: ModelStatusBadgeProps) {
-  const config = statusConfig[status] || statusConfig.offline
-  const ringRadius = 8
-  const ringCircumference = 2 * Math.PI * ringRadius
-  const clampedProgress = Math.min(100, Math.max(0, progress))
-  const ringDashOffset = ringCircumference * (1 - clampedProgress / 100)
-
+export default function ModelStatusBadge({
+  status,
+  onLoad,
+  onUnload,
+  segmentIndex = 0,
+  segmentProgress = 0,
+  message = '',
+  elapsed = 0,
+}: ModelStatusBadgeProps) {
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60)
     const s = Math.floor(seconds % 60)
     return `${m}:${s.toString().padStart(2, '0')}`
   }
 
+  const isLoading = status === 'loading'
+  const isReady = status === 'ready'
+  const isOffline = status === 'offline'
+  const isIdle = status === 'unloaded'
+  const isError = status === 'error'
+
   return (
     <motion.div
       layout
       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-      className="group flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 ring-1 ring-white/10 transition-all hover:bg-white/10"
+      className="group flex items-center gap-2.5 px-4 py-2 rounded-full bg-white/[0.03] ring-1 ring-white/10 transition-all hover:bg-white/[0.06]"
     >
-      {status === 'loading' ? (
-        <span className="relative flex h-5 w-5 items-center justify-center">
-          <svg
-            className="absolute inset-0 h-5 w-5 animate-[spin_3s_linear_infinite]"
-            viewBox="0 0 20 20"
-            aria-hidden="true"
-          >
-            <g transform="rotate(-90 10 10)">
-              <circle
-                cx="10"
-                cy="10"
-                r={ringRadius}
-                fill="none"
-                stroke="rgba(255,255,255,0.1)"
-                strokeWidth="2"
-              />
-              <circle
-                cx="10"
-                cy="10"
-                r={ringRadius}
-                fill="none"
-                stroke="#fbbf24"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeDasharray={ringCircumference}
-                strokeDashoffset={ringDashOffset}
-              />
-            </g>
-          </svg>
-          <span className="absolute h-2 w-2 rounded-full bg-amber-400 shadow-amber-400/50 opacity-75 animate-ping" />
-          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-400 shadow-[0_0_6px] shadow-amber-400/50" />
-        </span>
-      ) : (
+      {/* Dot indicator */}
+      {isLoading ? (
         <span className="relative flex h-2 w-2">
-          {config.pulse && (
-            <span className={`absolute inset-0 rounded-full ${config.color} opacity-75 animate-ping`} />
-          )}
-          <motion.span
-            layout
-            className={`relative inline-flex h-2 w-2 rounded-full ${config.color} shadow-[0_0_6px]`}
-          />
+          <span className="absolute inset-0 rounded-full bg-amber-400 opacity-60 animate-ping" />
+          <span className="relative h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.5)]" />
         </span>
+      ) : isReady ? (
+        <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
+      ) : isOffline || isError ? (
+        <span className="h-2 w-2 rounded-full bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.5)]" />
+      ) : (
+        <span className="h-2 w-2 rounded-full bg-zinc-500" />
       )}
-      <span className="text-[10px] font-mono tracking-widest text-muted-foreground uppercase">
+
+      {/* Label */}
+      <span className="text-[10px] tracking-widest text-white/35 uppercase">
         Model
       </span>
+
+      {/* Segments */}
+      {isOffline ? (
+        <div className="flex gap-[3px]">
+          <div className="h-1.5 w-8 rounded-full bg-red-400/15 border border-red-400/50" />
+        </div>
+      ) : isIdle ? (
+        <div className="flex gap-[3px]">
+          {SEGMENTS.map((seg) => (
+            <div key={seg.key} className="h-1.5 w-8 rounded-full border border-white/[0.06]" />
+          ))}
+        </div>
+      ) : (
+        <div className="flex gap-[3px] items-center">
+          {SEGMENTS.map((seg, i) => {
+            const isDone = isLoading ? i < segmentIndex : isReady
+            const isActive = isLoading && i === segmentIndex
+            const isErrorSegment = isError && i === segmentIndex
+
+            if (isErrorSegment) {
+              return (
+                <div
+                  key={seg.key}
+                  className="h-1.5 w-8 rounded-full bg-red-400/15 border border-red-400/50"
+                  title={seg.label}
+                />
+              )
+            }
+
+            if (isDone) {
+              return (
+                <div
+                  key={seg.key}
+                  className="h-1.5 w-8 rounded-full bg-emerald-400/30 border border-emerald-400/50"
+                  title={seg.label}
+                />
+              )
+            }
+
+            if (isActive) {
+              return (
+                <div
+                  key={seg.key}
+                  className="h-1.5 w-8 rounded-full bg-cyan-400/[0.06] border border-cyan-400/35 relative overflow-hidden"
+                  style={{ boxShadow: '0 0 6px rgba(0,240,255,0.25)' }}
+                  title={seg.label}
+                >
+                  <div
+                    className="absolute inset-0 bg-cyan-400/35 transition-all duration-500 ease-out"
+                    style={{ width: `${Math.min(100, Math.max(0, segmentProgress * 100))}%` }}
+                  />
+                </div>
+              )
+            }
+
+            return (
+              <div
+                key={seg.key}
+                className="h-1.5 w-8 rounded-full bg-white/[0.015] border border-white/[0.07]"
+                title={seg.label}
+              />
+            )
+          })}
+        </div>
+      )}
+
+      {/* Status label + message */}
       <AnimatePresence mode="wait">
         <motion.span
           key={status}
@@ -91,22 +139,22 @@ export default function ModelStatusBadge({ status, onLoad, onUnload, progress = 
           exit={{ y: 6, opacity: 0, filter: 'blur(4px)' }}
           transition={{ duration: 0.2 }}
           className={`text-[10px] font-mono tracking-widest font-bold ${
-            status === 'ready' ? 'text-emerald-400'
-              : status === 'loading' ? 'text-amber-400'
-              : status === 'unloaded' ? 'text-gray-400'
+            isReady ? 'text-emerald-400'
+              : isLoading ? 'text-amber-400'
+              : isIdle ? 'text-zinc-500'
               : 'text-red-400'
           }`}
         >
-          {config.label}
+          {isReady ? 'READY' : isLoading ? 'LOADING' : isIdle ? 'IDLE' : isOffline ? 'OFFLINE' : 'ERROR'}
         </motion.span>
 
-        {status === 'loading' && message && (
+        {isLoading && message && (
           <motion.span
             initial={{ opacity: 0, x: -4 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -4 }}
             transition={{ duration: 0.2 }}
-            className="ml-1.5 text-[11px] text-amber-400/80 normal-case tracking-normal whitespace-nowrap flex items-center gap-1"
+            className="text-[10px] text-amber-400/80 normal-case tracking-normal whitespace-nowrap flex items-center gap-1"
           >
             <span>{message}</span>
             {elapsed > 0 && <span className="opacity-70 font-mono">({formatTime(elapsed)})</span>}
@@ -114,30 +162,39 @@ export default function ModelStatusBadge({ status, onLoad, onUnload, progress = 
         )}
       </AnimatePresence>
 
-      {/* Action Buttons */}
-      {status === 'ready' && onUnload && (
-        <button 
-          onClick={onUnload}
-          title="Unload model from GPU memory"
-          className="ml-2 flex items-center gap-1 overflow-hidden max-w-0 opacity-0 group-hover:max-w-[100px] group-hover:opacity-100 transition-all duration-300 ease-in-out text-muted-foreground hover:text-red-400"
+      {/* Retry button (error/offline) */}
+      {(isOffline || isError) && onLoad && (
+        <button
+          onClick={onLoad}
+          title="Retry loading model"
+          className="ml-2 flex items-center gap-1 text-[10px] text-red-400/50 hover:text-red-400 transition-colors"
         >
-          <Power size={12} />
-          <span className="text-[10px] font-mono font-bold uppercase whitespace-nowrap">
-            Unload
-          </span>
+          <RefreshCw size={11} />
+          <span className="font-bold uppercase">Retry</span>
         </button>
       )}
 
-      {status === 'unloaded' && onLoad && (
-        <button 
+      {/* Unload button (ready, hover reveal) */}
+      {isReady && onUnload && (
+        <button
+          onClick={onUnload}
+          title="Unload model from GPU memory"
+          className="ml-2 flex items-center gap-1 overflow-hidden max-w-0 opacity-0 group-hover:max-w-[100px] group-hover:opacity-100 transition-all duration-300 text-white/30 hover:text-red-400"
+        >
+          <Power size={12} />
+          <span className="text-[10px] font-mono font-bold uppercase whitespace-nowrap">Unload</span>
+        </button>
+      )}
+
+      {/* Load button (idle, hover reveal) */}
+      {isIdle && onLoad && (
+        <button
           onClick={onLoad}
           title="Load model into GPU memory"
-          className="ml-2 flex items-center gap-1 overflow-hidden max-w-0 opacity-0 group-hover:max-w-[100px] group-hover:opacity-100 transition-all duration-300 ease-in-out text-emerald-400 hover:text-emerald-300"
+          className="ml-2 flex items-center gap-1 overflow-hidden max-w-0 opacity-0 group-hover:max-w-[100px] group-hover:opacity-100 transition-all duration-300 text-emerald-400 hover:text-emerald-300"
         >
           <Play size={12} />
-          <span className="text-[10px] font-mono font-bold uppercase whitespace-nowrap">
-            Load
-          </span>
+          <span className="text-[10px] font-mono font-bold uppercase whitespace-nowrap">Load</span>
         </button>
       )}
     </motion.div>

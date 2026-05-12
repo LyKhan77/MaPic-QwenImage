@@ -68,6 +68,18 @@ async def get_generation_status() -> dict:
         return {"stage": "idle", "step": 0, "total_steps": 0}
 
 
+async def get_load_state() -> dict:
+    url = GLM_IMAGE_API_URL.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{url}/v1/system/load/state")
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.warning("Load state check failed: %s", exc)
+        return {"status": "offline", "segment_index": 0, "segment_progress": 0.0, "progress": 0, "message": ""}
+
+
 async def generate_image_bytes(prompt: str, images: list[str] | None = None, num_inference_steps: int = 50, guidance_scale: float = 1.5) -> bytes:
     url = GLM_IMAGE_API_URL.rstrip("/")
 

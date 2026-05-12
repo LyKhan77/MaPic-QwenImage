@@ -114,5 +114,15 @@ export const api = {
     } catch {
       return []
     }
+  },
+
+  async getLoadState(): Promise<{ status: string; segment_index: number; segment_progress: number; progress: number; message: string }> {
+    try {
+      const res = await fetch(`${API_URL}/load/state`)
+      if (!res.ok) return { status: 'offline', segment_index: 0, segment_progress: 0, progress: 0, message: '' }
+      return res.json()
+    } catch {
+      return { status: 'offline', segment_index: 0, segment_progress: 0, progress: 0, message: '' }
+    }
   }
 }

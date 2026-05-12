@@ -32,6 +32,8 @@ export default function Dashboard({ session }: DashboardProps) {
   const [loadProgress, setLoadProgress] = useState(0)
   const [loadMessage, setLoadMessage] = useState('')
   const [loadElapsed, setLoadElapsed] = useState(0)
+  const [loadSegmentIndex, setLoadSegmentIndex] = useState(0)
+  const [loadSegmentProgress, setLoadSegmentProgress] = useState(0)
   const [pendingGenParams, setPendingGenParams] = useState<{ steps: number; numRefImages: number } | null>(null)
   const [genKey, setGenKey] = useState(0)
   const [pendingGenerations, setPendingGenerations] = useState<Record<string, PendingGeneration>>({})
@@ -59,20 +61,51 @@ export default function Dashboard({ session }: DashboardProps) {
     refetchIntervalInBackground: false,
   })
 
+  // Recover loading state on mount (survives page refresh)
+  useEffect(() => {
+    let isMounted = true
+    api.getLoadState().then((state) => {
+      if (!isMounted) return
+      if (state.status === 'loading') {
+        queryClient.setQueryData(['model-health'], 'loading')
+        setLoadProgress(state.progress)
+        setLoadMessage(state.message)
+        setLoadSegmentIndex(state.segment_index)
+        setLoadSegmentProgress(state.segment_progress)
+      }
+    })
+    return () => { isMounted = false }
+  }, [queryClient])
+
+  // Poll load state while model is loading (keeps segments in sync)
+  useEffect(() => {
+    if (modelStatus !== 'loading') return
+    const interval = setInterval(async () => {
+      try {
+        const state = await api.getLoadState()
+        if (state.status === 'loading') {
+          setLoadProgress(state.progress)
+          setLoadMessage(state.message)
+          setLoadSegmentIndex(state.segment_index)
+          setLoadSegmentProgress(state.segment_progress)
+        }
+      } catch { /* ignore */ }
+    }, 1500)
+    return () => clearInterval(interval)
+  }, [modelStatus])
+
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>
     if (modelStatus === 'loading') {
       interval = setInterval(() => {
         setLoadElapsed(prev => prev + 1)
-        setLoadProgress(prev => {
-          if (prev < 90) return prev + 0.3
-          return prev
-        })
       }, 1000)
     } else {
       setLoadElapsed(0)
       if (modelStatus !== 'ready') {
         setLoadProgress(0)
+        setLoadSegmentIndex(0)
+        setLoadSegmentProgress(0)
       }
     }
     return () => clearInterval(interval)
@@ -183,10 +216,23 @@ export default function Dashboard({ session }: DashboardProps) {
       queryClient.setQueryData(['model-health'], 'loading')
       setLoadProgress(0)
       setLoadElapsed(0)
+      setLoadSegmentIndex(0)
+      setLoadSegmentProgress(0)
       setLoadMessage('Connecting...')
       await api.loadModel((p, m) => {
-        setLoadProgress(prev => Math.max(prev, p))
+        setLoadProgress(p)
         setLoadMessage(m)
+        // Map progress to segment index/progress
+        const ranges = [[0, 14], [15, 79], [80, 94], [95, 100]]
+        for (let i = 0; i < ranges.length; i++) {
+          const [lo, hi] = ranges[i]
+          if (p >= lo) {
+            setLoadSegmentIndex(i)
+            if (p <= hi) {
+              setLoadSegmentProgress((p - lo) / Math.max(1, hi - lo))
+            }
+          }
+        }
       })
       queryClient.invalidateQueries({ queryKey: ['model-health'] })
     } catch (e) {
@@ -227,7 +273,7 @@ export default function Dashboard({ session }: DashboardProps) {
       <main className="flex flex-1 flex-col relative min-w-0 min-h-0">
         <div className="flex-1 relative min-h-0 flex flex-col">
            <div className="absolute top-4 right-6 z-50 flex flex-col items-end gap-2">
-             <ModelStatusBadge status={modelStatus} onLoad={handleLoadModel} onUnload={handleUnloadModel} progress={loadProgress} message={loadMessage} elapsed={loadElapsed} />
+             <ModelStatusBadge status={modelStatus} onLoad={handleLoadModel} onUnload={handleUnloadModel} segmentIndex={loadSegmentIndex} segmentProgress={loadSegmentProgress} message={loadMessage} elapsed={loadElapsed} />
              <GenerationStageBadge
                key={`stage-${genKey}`}
                isLoading={hasCurrentUserGenerationWork}
