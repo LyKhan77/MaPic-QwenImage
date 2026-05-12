@@ -26,6 +26,9 @@ start-mapic-glm.sh
 *.md
 !README.md
 .gemini/
+!database-schema.md
+!vercel-docs.md
+!API.md
 
 # Test files
 test_*.py
