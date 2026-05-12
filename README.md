@@ -30,8 +30,8 @@ User Browser
     +--> Vercel CDN (https://mapic-glm.vercel.app)
     |       Serves React SPA
     |
-    +--> Cloudflare Edge --> Tunnel --> Local Backend :8181
-            (https://<tunnel-url>.trycloudflare.com)
+    +--> Cloudflare Edge --> Named Tunnel --> Local Backend :8181
+            (https://api.mapic-backend.site)
                                               |
                                               +--> GLM-Image Server :30000
                                                      |
@@ -55,8 +55,8 @@ Frontend (React/Vite :5151)
 | Service | URL | Notes |
 |---------|-----|-------|
 | Frontend | `https://mapic-glm.vercel.app` | Vercel production app |
-| Backend tunnel | `https://gives-fame-award-tony.trycloudflare.com` | Temporary `trycloudflare.com` URL; changes after tunnel restart |
-| Backend health | `https://gives-fame-award-tony.trycloudflare.com/api/health` | Public health check through tunnel |
+| Backend tunnel | `https://api.mapic-backend.site` | Named tunnel — permanent URL |
+| Backend health | `https://api.mapic-backend.site/api/health` | Public health check through tunnel |
 | Backend local | `http://localhost:8181/api/health` | Local backend health check |
 | GLM-Image local | `http://localhost:30000/health` | Local inference server health check |
 
@@ -188,7 +188,7 @@ This starts GLM-Image server, backend, and local Vite frontend. In production, t
 Set these in Vercel project settings for Production:
 
 ```env
-VITE_API_URL=https://<tunnel-url>.trycloudflare.com/api
+VITE_API_URL=https://api.mapic-backend.site/api
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
@@ -198,12 +198,10 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 ### Start Cloudflare Tunnel
 
 ```bash
-nohup cloudflared tunnel --url http://127.0.0.1:8181 > /tmp/cloudflared-tunnel.log 2>&1 &
-sleep 5
-grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/cloudflared-tunnel.log | head -1
+cloudflared tunnel run mapic-backend
 ```
 
-When using a temporary `trycloudflare.com` tunnel, the URL changes after restart. Update `VITE_API_URL` in Vercel and redeploy every time the tunnel URL changes.
+The named tunnel uses `api.mapic-backend.site` — a permanent URL that does not change on restart.
 
 ### Deploy Frontend
 
@@ -224,10 +222,10 @@ curl -s http://localhost:30000/health
 curl -s http://localhost:8181/api/health
 
 # Backend through tunnel
-curl -s https://<tunnel-url>.trycloudflare.com/api/health
+curl -s https://api.mapic-backend.site/api/health
 
 # Verify tunnel reaches MaPic backend
-curl -s https://<tunnel-url>.trycloudflare.com/openapi.json \
+curl -s https://api.mapic-backend.site/openapi.json \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['title'])"
 # Expected: Mapic API
 ```
