@@ -5,6 +5,25 @@ export interface PendingGenerationSummary {
   startedAt: number
 }
 
+export function shouldShowActiveGenerationView({
+  currentGeneration,
+  hasCurrentUserGenerationWork,
+  isViewingActiveGeneration,
+}: {
+  currentGeneration: unknown | null
+  hasCurrentUserGenerationWork: boolean
+  isViewingActiveGeneration: boolean
+}): boolean {
+  return isViewingActiveGeneration && !currentGeneration && hasCurrentUserGenerationWork
+}
+
+export function didGenerationWorkComplete(
+  hadCurrentUserGenerationWork: boolean,
+  hasCurrentUserGenerationWork: boolean,
+): boolean {
+  return hadCurrentUserGenerationWork && !hasCurrentUserGenerationWork
+}
+
 export function getDisplayedGenerations(
   activeGenerations: ActiveGeneration[],
   pendingGenerations: Record<string, PendingGenerationSummary>,

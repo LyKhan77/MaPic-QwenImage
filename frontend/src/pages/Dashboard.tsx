@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -11,13 +11,21 @@ import ActiveGenerationsIndicator from '../components/ActiveGenerationsIndicator
 import type { Generation, ActiveGeneration } from '../types'
 import type { GenerationOptions } from '../components/PromptInput'
 import { Toaster, toast } from 'sonner'
-import { getActiveGenerationParams, hasGenerationWorkForUser } from '../lib/activeGenerationState'
+import {
+  didGenerationWorkComplete,
+  getActiveGenerationParams,
+  hasGenerationWorkForUser,
+  shouldShowActiveGenerationView,
+} from '../lib/activeGenerationState'
 
 interface DashboardProps {
   session: Session
 }
 
 const MAX_GLOBAL_GENERATIONS = 10
+
+const selectGeneratedPngHistory = (data: Generation[]) =>
+  data.filter((item: Generation) => item.image_path?.endsWith('.png') || item.public_url?.endsWith('.png'))
 
 interface PendingGeneration {
   prompt: string
@@ -40,6 +48,8 @@ export default function Dashboard({ session }: DashboardProps) {
   const [activeGenerations, setActiveGenerations] = useState<ActiveGeneration[]>([])
   const [globalStage, setGlobalStage] = useState('idle')
   const [isViewingActiveGeneration, setIsViewingActiveGeneration] = useState(false)
+  const [isNewGenerationDraft, setIsNewGenerationDraft] = useState(false)
+  const hadCurrentUserGenerationWorkRef = useRef(false)
   const pendingGenerationCount = Object.keys(pendingGenerations).length
   const optimisticPendingCount = Object.values(pendingGenerations).filter(pending =>
     !activeGenerations.some(gen => gen.user_id === session.user.id && gen.prompt === pending.prompt)
@@ -48,7 +58,11 @@ export default function Dashboard({ session }: DashboardProps) {
   const hasCurrentUserGenerationWork = hasGenerationWorkForUser(activeGenerations, pendingGenerations, session.user.id)
   const activeGenerationParams = getActiveGenerationParams(activeGenerations, session.user.id)
   const displayedGenParams = pendingGenParams ?? activeGenerationParams
-  const isViewingCurrentUserActiveGeneration = isViewingActiveGeneration || (!currentGen && hasCurrentUserGenerationWork)
+  const isViewingCurrentUserActiveGeneration = shouldShowActiveGenerationView({
+    currentGeneration: currentGen,
+    hasCurrentUserGenerationWork,
+    isViewingActiveGeneration,
+  })
 
   // Poll model health status
   const { data: modelStatus = 'offline' } = useQuery({
@@ -115,7 +129,7 @@ export default function Dashboard({ session }: DashboardProps) {
   const { data: history = [] } = useQuery({
     queryKey: ['history', session.user.id],
     queryFn: () => api.getHistory(session.user.id),
-    select: (data) => data.filter((item: Generation) => item.image_path?.endsWith('.png') || item.public_url?.endsWith('.png'))
+    select: selectGeneratedPngHistory
   })
 
   // Poll active generations + global stage for all users. This rehydrates active work after refresh.
@@ -140,6 +154,51 @@ export default function Dashboard({ session }: DashboardProps) {
     }
   }, [])
 
+  useEffect(() => {
+    let isCancelled = false
+
+    if (hasCurrentUserGenerationWork) {
+      hadCurrentUserGenerationWorkRef.current = true
+      if (!currentGen && !isNewGenerationDraft && !isViewingActiveGeneration) {
+        setIsViewingActiveGeneration(true)
+      }
+      return () => { isCancelled = true }
+    }
+
+    if (!didGenerationWorkComplete(hadCurrentUserGenerationWorkRef.current, hasCurrentUserGenerationWork)) {
+      return () => { isCancelled = true }
+    }
+
+    hadCurrentUserGenerationWorkRef.current = false
+    setIsViewingActiveGeneration(false)
+    setIsNewGenerationDraft(false)
+
+    void queryClient.fetchQuery({
+      queryKey: ['history', session.user.id],
+      queryFn: () => api.getHistory(session.user.id),
+    }).then((items) => {
+      if (isCancelled) return
+      const generatedPngHistory = selectGeneratedPngHistory(items)
+      queryClient.setQueryData(['history', session.user.id], generatedPngHistory)
+      if (generatedPngHistory[0]) {
+        setCurrentGen(generatedPngHistory[0])
+      }
+    }).catch((error) => {
+      if (!isCancelled) {
+        console.error(error)
+      }
+    })
+
+    return () => { isCancelled = true }
+  }, [
+    currentGen,
+    hasCurrentUserGenerationWork,
+    isNewGenerationDraft,
+    isViewingActiveGeneration,
+    queryClient,
+    session.user.id,
+  ])
+
   const handleGenerate = useCallback((prompt: string, images?: string[], options?: GenerationOptions) => {
     if (displayedGenerationCount >= MAX_GLOBAL_GENERATIONS) {
       toast.error('Global generation queue is full. Try again later.')
@@ -154,6 +213,7 @@ export default function Dashboard({ session }: DashboardProps) {
     setPendingGenerations(prev => ({ ...prev, [id]: { prompt, images, options, startedAt } }))
     setCurrentGen(null)
     setIsViewingActiveGeneration(true)
+    setIsNewGenerationDraft(false)
     setGenKey((prev) => prev + 1)
     setPendingGenParams({
       steps: options?.num_inference_steps ?? 50,
@@ -165,11 +225,13 @@ export default function Dashboard({ session }: DashboardProps) {
         queryClient.setQueryData(['history', session.user.id], (old: Generation[] = []) => [newGen, ...old])
         setCurrentGen(newGen)
         setIsViewingActiveGeneration(false)
+        setIsNewGenerationDraft(false)
         toast.success('Image generated successfully!')
       })
       .catch((error) => {
         console.error(error)
         setIsViewingActiveGeneration(false)
+        setIsNewGenerationDraft(false)
         toast.error(error instanceof Error ? error.message : 'Failed to generate image')
       })
       .finally(() => {
@@ -204,11 +266,13 @@ export default function Dashboard({ session }: DashboardProps) {
   const handleSelectHistory = (gen: Generation) => {
     setCurrentGen(gen)
     setIsViewingActiveGeneration(false)
+    setIsNewGenerationDraft(false)
   }
 
   const handleNewChat = () => {
     setCurrentGen(null)
     setIsViewingActiveGeneration(false)
+    setIsNewGenerationDraft(true)
   }
 
   const handleLoadModel = async () => {
@@ -255,6 +319,7 @@ export default function Dashboard({ session }: DashboardProps) {
   const handleFocusMyGen = useCallback(() => {
     setCurrentGen(null)
     setIsViewingActiveGeneration(true)
+    setIsNewGenerationDraft(false)
   }, [])
 
   return (

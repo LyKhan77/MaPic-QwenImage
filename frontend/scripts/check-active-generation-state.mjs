@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import {
+  didGenerationWorkComplete,
   getActiveGenerationParams,
   getDisplayedGenerations,
   hasGenerationWorkForUser,
+  shouldShowActiveGenerationView,
 } from '../src/lib/activeGenerationState.ts'
 
 const activeGenerations = [
@@ -52,3 +54,25 @@ assert.deepEqual(displayed[2], {
   elapsed_seconds: 3,
   status: 'queued',
 })
+
+assert.equal(shouldShowActiveGenerationView({
+  currentGeneration: null,
+  hasCurrentUserGenerationWork: true,
+  isViewingActiveGeneration: true,
+}), true)
+
+assert.equal(shouldShowActiveGenerationView({
+  currentGeneration: null,
+  hasCurrentUserGenerationWork: true,
+  isViewingActiveGeneration: false,
+}), false)
+
+assert.equal(shouldShowActiveGenerationView({
+  currentGeneration: { id: 'completed' },
+  hasCurrentUserGenerationWork: true,
+  isViewingActiveGeneration: true,
+}), false)
+
+assert.equal(didGenerationWorkComplete(true, false), true)
+assert.equal(didGenerationWorkComplete(true, true), false)
+assert.equal(didGenerationWorkComplete(false, false), false)
