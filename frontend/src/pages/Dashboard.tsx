@@ -29,7 +29,7 @@ interface PendingGeneration {
 export default function Dashboard({ session }: DashboardProps) {
   const queryClient = useQueryClient()
   const [currentGen, setCurrentGen] = useState<Generation | null>(null)
-  const [loadProgress, setLoadProgress] = useState(0)
+  const [, setLoadProgress] = useState(0)
   const [loadMessage, setLoadMessage] = useState('')
   const [loadElapsed, setLoadElapsed] = useState(0)
   const [loadSegmentIndex, setLoadSegmentIndex] = useState(0)

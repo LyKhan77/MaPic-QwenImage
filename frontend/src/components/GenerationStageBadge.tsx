@@ -23,10 +23,10 @@ const STAGES: StageInfo[] = [
 
 export default function GenerationStageBadge({
   isLoading,
-  steps,
-  numRefImages,
+  steps: _steps,
+  numRefImages: _numRefImages,
 }: GenerationStageBadgeProps) {
-  const [elapsed, setElapsed] = useState(0)
+  const [, setElapsed] = useState(0)
   const [backendStage, setBackendStage] = useState('idle')
 
   useEffect(() => {

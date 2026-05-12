@@ -38,7 +38,7 @@ export default function ModelStatusBadge({
   const isReady = status === 'ready'
   const isOffline = status === 'offline'
   const isIdle = status === 'unloaded'
-  const isError = status === 'error'
+  const isError = (status as string) === 'error'
 
   return (
     <motion.div
