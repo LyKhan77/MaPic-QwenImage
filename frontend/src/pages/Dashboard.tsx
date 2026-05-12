@@ -38,11 +38,7 @@ interface PendingGeneration {
 export default function Dashboard({ session }: DashboardProps) {
   const queryClient = useQueryClient()
   const [currentGen, setCurrentGen] = useState<Generation | null>(null)
-  const [, setLoadProgress] = useState(0)
-  const [loadMessage, setLoadMessage] = useState('')
   const [loadElapsed, setLoadElapsed] = useState(0)
-  const [loadSegmentIndex, setLoadSegmentIndex] = useState(0)
-  const [loadSegmentProgress, setLoadSegmentProgress] = useState(0)
   const [pendingGenParams, setPendingGenParams] = useState<{ steps: number; numRefImages: number } | null>(null)
   const [genKey, setGenKey] = useState(0)
   const [pendingGenerations, setPendingGenerations] = useState<Record<string, PendingGeneration>>({})
@@ -74,7 +70,7 @@ export default function Dashboard({ session }: DashboardProps) {
     queryFn: api.getHealth,
     refetchInterval: (query) => {
       if (query.state.data === 'ready') return false
-      return 5000
+      return 10000
     },
     refetchIntervalInBackground: false,
   })
@@ -107,32 +103,12 @@ export default function Dashboard({ session }: DashboardProps) {
       if (!isMounted) return
       if (state.status === 'loading') {
         queryClient.setQueryData(['model-health'], 'loading')
-        setLoadProgress(state.progress)
-        setLoadMessage(state.message)
-        setLoadSegmentIndex(state.segment_index)
-        setLoadSegmentProgress(state.segment_progress)
       }
     })
     return () => { isMounted = false }
   }, [queryClient])
 
-  // Poll load state while model is loading (keeps segments in sync)
-  useEffect(() => {
-    if (modelStatus !== 'loading') return
-    const interval = setInterval(async () => {
-      try {
-        const state = await api.getLoadState()
-        if (state.status === 'loading') {
-          setLoadProgress(state.progress)
-          setLoadMessage(state.message)
-          setLoadSegmentIndex(state.segment_index)
-          setLoadSegmentProgress(state.segment_progress)
-        }
-      } catch { /* ignore */ }
-    }, 1500)
-    return () => clearInterval(interval)
-  }, [modelStatus])
-
+  // Elapsed timer during model loading
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>
     if (modelStatus === 'loading') {
@@ -141,11 +117,6 @@ export default function Dashboard({ session }: DashboardProps) {
       }, 1000)
     } else {
       setLoadElapsed(0)
-      if (modelStatus !== 'ready') {
-        setLoadProgress(0)
-        setLoadSegmentIndex(0)
-        setLoadSegmentProgress(0)
-      }
     }
     return () => clearInterval(interval)
   }, [modelStatus])
@@ -160,6 +131,7 @@ export default function Dashboard({ session }: DashboardProps) {
   // Poll active generations + global stage for all users. This rehydrates active work after refresh.
   useEffect(() => {
     let isMounted = true
+    let intervalId: ReturnType<typeof setInterval>
 
     const poll = async () => {
       const [active, status] = await Promise.all([
@@ -171,13 +143,20 @@ export default function Dashboard({ session }: DashboardProps) {
       setGlobalStage(status.stage && status.stage !== 'idle' ? status.stage : 'idle')
     }
 
+    const schedulePoll = () => {
+      const hasActiveWork = activeGenerations.length > 0 || globalStage !== 'idle'
+      clearInterval(intervalId)
+      intervalId = setInterval(poll, hasActiveWork ? 2000 : 5000)
+    }
+
     void poll()
-    const intervalId = setInterval(poll, 3000)
+    schedulePoll()
+
     return () => {
       isMounted = false
       clearInterval(intervalId)
     }
-  }, [])
+  }, [activeGenerations.length, globalStage])
 
   useEffect(() => {
     let isCancelled = false
@@ -303,26 +282,8 @@ export default function Dashboard({ session }: DashboardProps) {
   const handleLoadModel = async () => {
     try {
       queryClient.setQueryData(['model-health'], 'loading')
-      setLoadProgress(0)
       setLoadElapsed(0)
-      setLoadSegmentIndex(0)
-      setLoadSegmentProgress(0)
-      setLoadMessage('Connecting...')
-      await api.loadModel((p, m) => {
-        setLoadProgress(p)
-        setLoadMessage(m)
-        // Map progress to segment index/progress
-        const ranges = [[0, 14], [15, 79], [80, 94], [95, 100]]
-        for (let i = 0; i < ranges.length; i++) {
-          const [lo, hi] = ranges[i]
-          if (p >= lo) {
-            setLoadSegmentIndex(i)
-            if (p <= hi) {
-              setLoadSegmentProgress((p - lo) / Math.max(1, hi - lo))
-            }
-          }
-        }
-      })
+      await api.loadModel()
       queryClient.invalidateQueries({ queryKey: ['model-health'] })
     } catch (e) {
       console.error(e)
@@ -383,7 +344,7 @@ export default function Dashboard({ session }: DashboardProps) {
       <main className="flex flex-1 flex-col relative min-w-0 min-h-0">
         <div className="flex-1 relative min-h-0 flex flex-col">
            <div className="absolute top-4 right-6 z-50 flex flex-col items-end gap-2">
-             <ModelStatusBadge status={modelStatus} onLoad={handleLoadModel} onUnload={handleUnloadModel} segmentIndex={loadSegmentIndex} segmentProgress={loadSegmentProgress} message={loadMessage} elapsed={loadElapsed} />
+             <ModelStatusBadge status={modelStatus} onLoad={handleLoadModel} onUnload={handleUnloadModel} elapsed={loadElapsed} />
              <GenerationStageBadge
                key={`stage-${genKey}`}
                isLoading={hasCurrentUserGenerationWork}

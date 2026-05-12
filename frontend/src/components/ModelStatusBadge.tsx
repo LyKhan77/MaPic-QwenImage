@@ -6,26 +6,13 @@ interface ModelStatusBadgeProps {
   status: ModelStatus
   onLoad?: () => void
   onUnload?: () => void
-  segmentIndex?: number
-  segmentProgress?: number
-  message?: string
   elapsed?: number
 }
-
-const SEGMENTS = [
-  { key: 'preflight', label: 'Pre-flight' },
-  { key: 'weights', label: 'Weights' },
-  { key: 'optimize', label: 'Optimize' },
-  { key: 'finalize', label: 'Finalize' },
-]
 
 export default function ModelStatusBadge({
   status,
   onLoad,
   onUnload,
-  segmentIndex = 0,
-  segmentProgress = 0,
-  message = '',
   elapsed = 0,
 }: ModelStatusBadgeProps) {
   const formatTime = (seconds: number) => {
@@ -65,72 +52,27 @@ export default function ModelStatusBadge({
         Model
       </span>
 
-      {/* Segments */}
-      {isOffline ? (
-        <div className="flex gap-[3px]">
-          <div className="h-1.5 w-8 rounded-full bg-red-400/15 border border-red-400/50" />
+      {/* Bar */}
+      {isOffline || isError ? (
+        <div className="h-1.5 w-[6.5rem] rounded-full bg-red-400/15 border border-red-400/50" />
+      ) : isLoading ? (
+        <div className="h-1.5 w-[6.5rem] rounded-full bg-amber-400/[0.06] border border-amber-400/35 relative overflow-hidden">
+          <div
+            className="absolute inset-0 rounded-full"
+            style={{
+              background: 'linear-gradient(90deg, transparent 0%, rgba(251,191,36,0.25) 50%, transparent 100%)',
+              animation: 'shimmer 1.8s ease-in-out infinite',
+              transform: 'translateX(-100%)',
+            }}
+          />
         </div>
-      ) : isIdle ? (
-        <div className="flex gap-[3px]">
-          {SEGMENTS.map((seg) => (
-            <div key={seg.key} className="h-1.5 w-8 rounded-full border border-white/[0.06]" />
-          ))}
-        </div>
+      ) : isReady ? (
+        <div className="h-1.5 w-[6.5rem] rounded-full bg-emerald-400/30 border border-emerald-400/50" />
       ) : (
-        <div className="flex gap-[3px] items-center">
-          {SEGMENTS.map((seg, i) => {
-            const isDone = isLoading ? i < segmentIndex : isReady
-            const isActive = isLoading && i === segmentIndex
-            const isErrorSegment = isError && i === segmentIndex
-
-            if (isErrorSegment) {
-              return (
-                <div
-                  key={seg.key}
-                  className="h-1.5 w-8 rounded-full bg-red-400/15 border border-red-400/50"
-                  title={seg.label}
-                />
-              )
-            }
-
-            if (isDone) {
-              return (
-                <div
-                  key={seg.key}
-                  className="h-1.5 w-8 rounded-full bg-emerald-400/30 border border-emerald-400/50"
-                  title={seg.label}
-                />
-              )
-            }
-
-            if (isActive) {
-              return (
-                <div
-                  key={seg.key}
-                  className="h-1.5 w-8 rounded-full bg-cyan-400/[0.06] border border-cyan-400/35 relative overflow-hidden"
-                  style={{ boxShadow: '0 0 6px rgba(0,240,255,0.25)' }}
-                  title={seg.label}
-                >
-                  <div
-                    className="absolute inset-0 bg-cyan-400/35 transition-all duration-500 ease-out"
-                    style={{ width: `${Math.min(100, Math.max(0, segmentProgress * 100))}%` }}
-                  />
-                </div>
-              )
-            }
-
-            return (
-              <div
-                key={seg.key}
-                className="h-1.5 w-8 rounded-full bg-white/[0.015] border border-white/[0.07]"
-                title={seg.label}
-              />
-            )
-          })}
-        </div>
+        <div className="h-1.5 w-[6.5rem] rounded-full border border-white/[0.06]" />
       )}
 
-      {/* Status label + message */}
+      {/* Status label */}
       <AnimatePresence mode="wait">
         <motion.span
           key={status}
@@ -147,20 +89,14 @@ export default function ModelStatusBadge({
         >
           {isReady ? 'READY' : isLoading ? 'LOADING' : isIdle ? 'IDLE' : isOffline ? 'OFFLINE' : 'ERROR'}
         </motion.span>
-
-        {isLoading && message && (
-          <motion.span
-            initial={{ opacity: 0, x: -4 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -4 }}
-            transition={{ duration: 0.2 }}
-            className="text-[10px] text-amber-400/80 normal-case tracking-normal whitespace-nowrap flex items-center gap-1"
-          >
-            <span>{message}</span>
-            {elapsed > 0 && <span className="opacity-70 font-mono">({formatTime(elapsed)})</span>}
-          </motion.span>
-        )}
       </AnimatePresence>
+
+      {/* Elapsed timer during loading */}
+      {isLoading && elapsed > 0 && (
+        <span className="text-[10px] text-amber-400/60 font-mono">
+          {formatTime(elapsed)}
+        </span>
+      )}
 
       {/* Retry button (error/offline) */}
       {(isOffline || isError) && onLoad && (
@@ -197,6 +133,14 @@ export default function ModelStatusBadge({
           <span className="text-[10px] font-mono font-bold uppercase whitespace-nowrap">Load</span>
         </button>
       )}
+
+      {/* Shimmer keyframes */}
+      <style>{`
+        @keyframes shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+      `}</style>
     </motion.div>
   )
 }

@@ -45,7 +45,7 @@ export default function GenerationStageBadge({
       } catch {
         // ignore polling errors
       }
-    }, 1200)
+    }, 2000)
 
     return () => {
       clearInterval(timer)
