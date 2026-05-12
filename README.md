@@ -12,7 +12,7 @@ MaPic turns text prompts and reference images into production-quality visuals wi
 *   **Cloudflare Tunnel Backend Access:** Vercel frontend communicates with the local backend through a public tunnel URL.
 *   **Local GPU Inference:** GLM-Image server runs locally on CUDA GPUs with no cloud inference cost or rate limit.
 *   **Model Load Controls:** The UI can load and unload the model. The inference server also unloads from VRAM after 1 hour of inactivity.
-*   **Generation Queue:** Users can submit another prompt while a generation is active. Backend accepts up to 10 active or queued generation requests globally.
+*   **Generation Queue:** Users can submit another prompt while a generation is active by clicking **New Generation**. The active loading view stays read-only.
 *   **Active Generation Recovery:** The active generation indicator shows queued/running/saving jobs, rehydrates the current user's active job view after refresh, and opens the newest completed result automatically.
 *   **Configurable Generation Params:** Frontend exposes `num_inference_steps` and `guidance_scale`.
 *   **History Management:** Generated images and prompts are saved to Supabase and can be viewed, selected, or deleted.
@@ -240,7 +240,7 @@ curl -s https://<tunnel-url>.trycloudflare.com/openapi.json \
 4.  Optionally attach up to 3 reference images.
 5.  Adjust inference steps or guidance scale if needed.
 6.  Click **Generate** or press Enter.
-7.  During generation, use **New Generation** to open a clean prompt and submit another request while the current job continues.
+7.  During generation, the loading view is read-only. Use **New Generation** to open a clean prompt and submit another request while the current job continues.
 8.  Track queued/running/saving jobs in the active generation indicator, or click your active job to refocus the loader.
 9.  Completed jobs open directly in the canvas, and prior generations remain available from the sidebar.
 

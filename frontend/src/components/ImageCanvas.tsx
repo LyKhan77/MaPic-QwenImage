@@ -136,16 +136,6 @@ export default function ImageCanvas({ currentGeneration, isLoading, modelStatus,
                   numRefImages={pendingGenParams?.numRefImages ?? 0}
                 />
               )}
-              {modelStatus === 'ready' && (
-                <div className="w-full max-w-2xl mt-6">
-                  <PromptInput
-                    onGenerate={onGenerate}
-                    isLoading={isLoading}
-                    isCentralized={true}
-                    modelStatus={modelStatus}
-                  />
-                </div>
-              )}
             </motion.div>
           ) : currentGeneration ? (
             <motion.div 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   didGenerationWorkComplete,
   getActiveGenerationParams,
@@ -76,3 +77,11 @@ assert.equal(shouldShowActiveGenerationView({
 assert.equal(didGenerationWorkComplete(true, false), true)
 assert.equal(didGenerationWorkComplete(true, true), false)
 assert.equal(didGenerationWorkComplete(false, false), false)
+
+const imageCanvasSource = readFileSync(new URL('../src/components/ImageCanvas.tsx', import.meta.url), 'utf8')
+const loadingBranchSource = imageCanvasSource.slice(
+  imageCanvasSource.indexOf('key="loading"'),
+  imageCanvasSource.indexOf(') : currentGeneration ?'),
+)
+
+assert.equal(loadingBranchSource.includes('<PromptInput'), false)
