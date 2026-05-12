@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { AlertTriangle, ExternalLink, X } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
 import ImageCanvas from '../components/ImageCanvas'
 import PromptInput from '../components/PromptInput'
@@ -49,6 +50,9 @@ export default function Dashboard({ session }: DashboardProps) {
   const [globalStage, setGlobalStage] = useState('idle')
   const [isViewingActiveGeneration, setIsViewingActiveGeneration] = useState(false)
   const [isNewGenerationDraft, setIsNewGenerationDraft] = useState(false)
+  const [tunnelUrlMismatch, setTunnelUrlMismatch] = useState(false)
+  const [tunnelDashboardUrl, setTunnelDashboardUrl] = useState('')
+  const [tunnelDismissed, setTunnelDismissed] = useState(false)
   const hadCurrentUserGenerationWorkRef = useRef(false)
   const pendingGenerationCount = Object.keys(pendingGenerations).length
   const optimisticPendingCount = Object.values(pendingGenerations).filter(pending =>
@@ -74,6 +78,27 @@ export default function Dashboard({ session }: DashboardProps) {
     },
     refetchIntervalInBackground: false,
   })
+
+  // Check if tunnel URL matches deployed VITE_API_URL (only in production)
+  useEffect(() => {
+    const deployedApiUrl = import.meta.env.VITE_API_URL
+    if (!deployedApiUrl) return
+
+    const check = async () => {
+      try {
+        const status = await api.getTunnelStatus()
+        if (status.tunnel_url) {
+          const tunnelApiBase = `${status.tunnel_url}/api`
+          setTunnelDashboardUrl(status.vercel_dashboard)
+          setTunnelUrlMismatch(tunnelApiBase !== deployedApiUrl)
+        }
+      } catch { /* ignore */ }
+    }
+
+    void check()
+    const interval = setInterval(check, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   // Recover loading state on mount (survives page refresh)
   useEffect(() => {
@@ -325,6 +350,26 @@ export default function Dashboard({ session }: DashboardProps) {
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background text-foreground font-sans">
       <Toaster position="top-right" theme="dark" />
+
+      {tunnelUrlMismatch && !tunnelDismissed && (
+        <div className="fixed top-0 left-0 right-0 z-[100] flex items-center justify-center gap-3 px-4 py-2 bg-amber-500/90 text-black text-sm font-medium shadow-lg backdrop-blur-sm">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>Tunnel URL changed. Redeploy frontend to update the API connection.</span>
+          {tunnelDashboardUrl && (
+            <a
+              href={tunnelDashboardUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-2 py-0.5 bg-black/20 rounded text-xs font-semibold hover:bg-black/30 transition-colors"
+            >
+              Vercel Dashboard <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+          <button onClick={() => setTunnelDismissed(true)} className="ml-1 hover:bg-black/20 rounded p-0.5 transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       <Sidebar
         session={session}
