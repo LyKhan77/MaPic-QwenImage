@@ -124,7 +124,7 @@ export const api = {
     } catch {
       return { status: 'offline', segment_index: 0, segment_progress: 0, progress: 0, message: '' }
     }
-  }
+  },
 
   async getTunnelStatus(): Promise<{ tunnel_url: string | null; vercel_dashboard: string }> {
     try {
