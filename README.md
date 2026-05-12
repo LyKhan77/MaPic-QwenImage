@@ -2,70 +2,110 @@
 
 **Developed by Lee Khan** | *Synthesizing the Future*
 
-MaPic turns text prompts and reference images into production-quality visuals — running entirely on local hardware. Built on **GLM-Image** (9B AR + 7B diffusion decoder), it delivers text-to-image and multi-reference image-to-image generation with no cloud dependencies, no API costs, and no rate limits.
+MaPic turns text prompts and reference images into production-quality visuals with local GLM-Image inference. The production frontend is deployed on Vercel, while the backend and GPU inference stack run on local hardware and are exposed to the frontend through Cloudflare Tunnel.
 
 ## 🚀 Features
 
-*   **AI Image Generation:** Generate images using GLM-Image (local inference via diffusers pipeline).
-*   **Multi-Reference Support:** Attach up to 3 reference images for image-to-image generation (style transfer, editing, identity-preserving).
-*   **Modern UI:** Futuristic "Glassmorphism" design with smooth animations (Framer Motion).
-*   **Theme Support:** Fully supported **Dark** and **Light** modes with a one-click toggle.
-*   **VRAM Optimization (Soft Unload):** Automatically unloads the model from GPU VRAM after 1 hour of inactivity to save resources. Supports manual **Load/Unload** directly from the UI status badge.
-*   **On-Demand Loading:** Automatically reloads the model when a new generation request is made, ensuring a seamless experience even after the model has been idle.
-*   **History Management:** Automatically saves generated images and prompts. View, select, and delete history items.
-*   **Multi-Generation Queue:** Start a new prompt while another image is generating; accepted requests appear in the active generations indicator as queued until inference begins, and active queues recover after page refresh.
-*   **Global Capacity Limit:** Backend accepts up to 10 active or queued generation requests across all users.
-*   **Responsive Design:** Collapsible sidebar and mobile-friendly layout.
+*   **AI Image Generation:** Generate images with GLM-Image using a local diffusers pipeline.
+*   **Multi-Reference Support:** Attach up to 3 reference images for image-to-image generation, style transfer, editing, and identity-preserving workflows.
+*   **Production Frontend on Vercel:** React SPA is served from `https://mapic-glm.vercel.app`.
+*   **Cloudflare Tunnel Backend Access:** Vercel frontend communicates with the local backend through a public tunnel URL.
+*   **Local GPU Inference:** GLM-Image server runs locally on CUDA GPUs with no cloud inference cost or rate limit.
+*   **Model Load Controls:** The UI can load and unload the model. The inference server also unloads from VRAM after 1 hour of inactivity.
+*   **Generation Queue:** Users can submit another prompt while a generation is active. Backend accepts up to 10 active or queued generation requests globally.
+*   **Active Generation Recovery:** The active generation indicator shows queued/running/saving jobs, rehydrates the current user's active job view after refresh, and opens the newest completed result automatically.
+*   **Configurable Generation Params:** Frontend exposes `num_inference_steps` and `guidance_scale`.
+*   **History Management:** Generated images and prompts are saved to Supabase and can be viewed, selected, or deleted.
 *   **Secure Auth:** Google OAuth 2.0 via Supabase Authentication.
-*   **Share & Download:** Easily download images or copy direct links to the clipboard.
+*   **Responsive UI:** Collapsible sidebar, dark/light mode, Framer Motion animations, and mobile-friendly layout.
+*   **Share & Download:** Download images or copy direct public links.
 
 ## 🏗️ Architecture
 
+### Production Flow
+
 ```
-Frontend (React :5151)
-    ↓
-MaPic Backend (FastAPI :8181)
-    ↓
-GLM-Image Server (FastAPI :30000)
-    ↓
-diffusers GlmImagePipeline (3-GPU bf16, 56 GB VRAM)
+User Browser
+    |
+    +--> Vercel CDN (https://mapic-glm.vercel.app)
+    |       Serves React SPA
+    |
+    +--> Cloudflare Edge --> Tunnel --> Local Backend :8181
+            (https://<tunnel-url>.trycloudflare.com)
+                                              |
+                                              +--> GLM-Image Server :30000
+                                                     |
+                                                     +--> diffusers GlmImagePipeline
 ```
+
+### Local Development Flow
+
+```
+Frontend (React/Vite :5151)
+    |
+    +--> MaPic Backend (FastAPI :8181)
+            |
+            +--> GLM-Image Server (FastAPI :30000)
+                    |
+                    +--> GLM-Image local pipeline
+```
+
+## 🌐 Current Deployment
+
+| Service | URL | Notes |
+|---------|-----|-------|
+| Frontend | `https://mapic-glm.vercel.app` | Vercel production app |
+| Backend tunnel | `https://gives-fame-award-tony.trycloudflare.com` | Temporary `trycloudflare.com` URL; changes after tunnel restart |
+| Backend health | `https://gives-fame-award-tony.trycloudflare.com/api/health` | Public health check through tunnel |
+| Backend local | `http://localhost:8181/api/health` | Local backend health check |
+| GLM-Image local | `http://localhost:30000/health` | Local inference server health check |
+
+For Vercel and Cloudflare Tunnel troubleshooting, see [vercel-docs.md](vercel-docs.md).
 
 ## 🛠️ Tech Stack
 
 ### Frontend
-*   **Framework:** React (Vite)
+*   **Framework:** React 18 + Vite
 *   **Styling:** Tailwind CSS
 *   **Icons:** Lucide React
-*   **State Management:** TanStack Query (React Query)
+*   **State Management:** TanStack Query
 *   **Animations:** Framer Motion
 *   **Notifications:** Sonner
+*   **Hosting:** Vercel
 
 ### Backend
 *   **Framework:** Python FastAPI
-*   **AI Engine:** GLM-Image (local diffusers pipeline)
-*   **Database & Storage:** Supabase (PostgreSQL + Storage Buckets)
+*   **Database & Storage:** Supabase PostgreSQL + Storage
+*   **Tunnel:** Cloudflare Tunnel to local `:8181`
+*   **AI Service Client:** HTTP client to GLM-Image server
 
 ### Inference Server
 *   **Framework:** Python FastAPI + Uvicorn
-*   **Model:** GLM-Image (9B AR + 7B Diffusion Decoder)
-*   **Runtime:** PyTorch with CUDA, diffusers, transformers
+*   **Model:** GLM-Image (`zai-org/GLM-Image`, 9B AR + 7B diffusion decoder)
+*   **Runtime:** PyTorch, CUDA, diffusers, transformers, bitsandbytes 8-bit quantization
+*   **Hardware Target:** RTX 4090 24 GB + 2x RTX 5080 16 GB
+*   **Optimizations:** Balanced device map, explicit `MAX_MEMORY`, VAE slicing/tiling, attention slicing, Flash SDP, memory-efficient SDP
+*   **Note:** `torch.compile` is currently disabled in code to preserve VRAM for activations.
 
 ## 📦 Installation & Setup
 
 ### Prerequisites
-*   Node.js & npm
+*   Node.js and npm
 *   Python 3.10+
-*   CUDA-capable GPUs: 3x NVIDIA GPUs totaling ~56 GB VRAM (2x RTX 5080 16 GB + RTX 4090 24 GB)
-*   Supabase Account (Project URL & Service Role Key)
+*   CUDA-capable NVIDIA GPUs
+*   Supabase project with Auth, PostgreSQL, and Storage configured
+*   `cloudflared` for production tunnel access
+*   Vercel account/CLI for frontend deployment
 
 ### 1. Clone the Repository
+
 ```bash
-git clone https://github.com/your-username/mapic.git
-cd mapic
+git clone https://github.com/LyKhan77/MaPic-GLM.git
+cd MaPic-GLM
 ```
 
 ### 2. GLM-Image Server Setup
+
 ```bash
 cd glm_image_server
 python -m venv .venv
@@ -73,13 +113,16 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-First run downloads ~35GB model from HuggingFace. Start the server:
+Start the server:
+
 ```bash
-python -m glm_image_server.main
-# Wait for "GLM-Image pipeline loaded." before testing
+python -m uvicorn main:app --host 0.0.0.0 --port 30000
 ```
 
+The first model load downloads GLM-Image weights from Hugging Face.
+
 ### 3. Backend Setup
+
 ```bash
 cd backend
 python -m venv venv
@@ -87,62 +130,133 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Create a `.env` file in `backend/`:
+Create `backend/.env`:
+
 ```env
-SUPABASE_URL="your_supabase_url"
-SUPABASE_SERVICE_ROLE_KEY="your_supabase_service_role_key"
+SUPABASE_URL="https://your-project.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
 GLM_IMAGE_API_URL="http://localhost:30000"
-CORS_ORIGINS="http://localhost:5151"
+CORS_ORIGINS="http://localhost:5151,http://localhost:5152,https://mapic-glm.vercel.app"
+```
+
+Start the backend:
+
+```bash
+python -m uvicorn main:app --host 0.0.0.0 --port 8181 --reload
 ```
 
 ### 4. Frontend Setup
+
 ```bash
 cd frontend
 npm install
 ```
 
-Create a `.env` file in `frontend/`:
+Create `frontend/.env` for local development:
+
 ```env
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
+VITE_API_URL=http://localhost:8181/api
 ```
 
-### 5. Run Everything
+Run locally:
 
 ```bash
-# From project root
+npm run dev
+```
+
+Local URLs:
+*   Frontend: `http://localhost:5151`
+*   Backend: `http://localhost:8181`
+*   GLM-Image Server: `http://localhost:30000`
+
+### 5. Start All Local Services
+
+From project root:
+
+```bash
 bash start-app.sh
 ```
 
-Or start services individually:
-```bash
-# Terminal 1: GLM-Image Server
-cd glm_image_server && source .venv/bin/activate && python -m glm_image_server.main
+This starts GLM-Image server, backend, and local Vite frontend. In production, the frontend is served by Vercel, so the local Vite frontend is optional.
 
-# Terminal 2: Backend
-cd backend && source venv/bin/activate && python -m uvicorn main:app --host 0.0.0.0 --port 8181 --reload
+## 🚢 Production Frontend + Tunnel
 
-# Terminal 3: Frontend
-cd frontend && npm run dev
+### Vercel Environment Variables
+
+Set these in Vercel project settings for Production:
+
+```env
+VITE_API_URL=https://<tunnel-url>.trycloudflare.com/api
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-- Frontend: http://localhost:5151
-- Backend: http://localhost:8181
-- GLM-Image Server: http://localhost:30000
+`VITE_API_URL` must include the `/api` suffix because the backend routes are mounted under `/api`.
+
+### Start Cloudflare Tunnel
+
+```bash
+nohup cloudflared tunnel --url http://127.0.0.1:8181 > /tmp/cloudflared-tunnel.log 2>&1 &
+sleep 5
+grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/cloudflared-tunnel.log | head -1
+```
+
+When using a temporary `trycloudflare.com` tunnel, the URL changes after restart. Update `VITE_API_URL` in Vercel and redeploy every time the tunnel URL changes.
+
+### Deploy Frontend
+
+```bash
+cd frontend
+vercel --prod
+```
+
+The frontend is a static React SPA. `frontend/vercel.json` rewrites all routes to `index.html` for client-side routing.
+
+## ✅ Health Checks
+
+```bash
+# GLM-Image server
+curl -s http://localhost:30000/health
+
+# Backend local
+curl -s http://localhost:8181/api/health
+
+# Backend through tunnel
+curl -s https://<tunnel-url>.trycloudflare.com/api/health
+
+# Verify tunnel reaches MaPic backend
+curl -s https://<tunnel-url>.trycloudflare.com/openapi.json \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['title'])"
+# Expected: Mapic API
+```
 
 ## 🖼️ Usage
 
-1.  Login with your Google account.
-2.  Use the **Prompt Input** at the bottom to describe the image you want.
-3.  Attach reference images (up to 3, max 2MB each) via the paperclip button.
-4.  Click **Generate** or press Enter.
-5.  Wait on the read-only loading screen while the image is generated, or click **New Generation** to open a single new prompt input.
-6.  Submit more prompts while other generations run; each request is queued by the backend and shown in the active generations indicator across users. Queued jobs do not start their generation timer until inference begins, and your active generation view recovers after refresh.
-7.  View completed creations in the main canvas.
-8.  Use the bottom prompt input on a result page to start another generation.
-9.  Use the **Sidebar** to access previous generations or switch themes.
+1.  Open `https://mapic-glm.vercel.app` or local frontend `http://localhost:5151`.
+2.  Login with Google through Supabase Auth.
+3.  Type a prompt in the bottom prompt input.
+4.  Optionally attach up to 3 reference images.
+5.  Adjust inference steps or guidance scale if needed.
+6.  Click **Generate** or press Enter.
+7.  During generation, use **New Generation** to open a clean prompt and submit another request while the current job continues.
+8.  Track queued/running/saving jobs in the active generation indicator, or click your active job to refocus the loader.
+9.  Completed jobs open directly in the canvas, and prior generations remain available from the sidebar.
 
-MaPic accepts a maximum of 10 active or queued generation requests globally across all users. When capacity is full, new requests are rejected with a clear retry-later message.
+MaPic accepts a maximum of 10 active or queued generation requests globally. When capacity is full, new requests return HTTP 429 with a retry-later message.
+
+## 🔧 Troubleshooting
+
+Use [vercel-docs.md](vercel-docs.md) for detailed production troubleshooting.
+
+Common checks:
+
+*   If the frontend shows offline, verify the tunnel is running and `VITE_API_URL` points to the current tunnel URL.
+*   If browser console shows CORS errors, confirm backend `CORS_ORIGINS` includes `https://mapic-glm.vercel.app`.
+*   If the tunnel reaches the wrong app, check `~/.cloudflared/config.yml` and confirm ingress points to `http://localhost:8181`.
+*   If Supabase login fails on Vercel, confirm Vercel env vars and Supabase redirect URLs include `https://mapic-glm.vercel.app`.
+*   If model status is offline, check both `http://localhost:30000/health` and `http://localhost:8181/api/health`.
 
 ## ⚡ Creator
 
