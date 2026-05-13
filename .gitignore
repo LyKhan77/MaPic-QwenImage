@@ -40,3 +40,4 @@ glm_image_server/.venv/
 glm_image_server/venv/
 glm_image_server/__pycache__/
 models/
+.vercel

@@ -181,6 +181,43 @@ vercel --prod
 
 ---
 
+## Frontend Update Workflow
+
+Every time you push frontend changes to `vercel/conf`, Vercel auto-deploys. If it doesn't, or you need a manual deploy:
+
+```bash
+# 1. Verify build passes locally first
+cd ~/project_cv/MaPic/frontend
+npx tsc --noEmit && npx vite build
+
+# 2a. Auto-deploy via git push (Vercel watches vercel/conf branch)
+cd ~/project_cv/MaPic
+git push origin vercel/conf
+
+# 2b. Manual deploy (if auto-deploy fails or is disabled)
+cd ~/project_cv/MaPic/frontend && vercel --prod
+```
+
+**Troubleshooting failed deployments:**
+
+```bash
+# Check deployment logs
+vercel logs
+
+# Check env vars are set (VITE_ vars must exist for build)
+vercel env ls
+
+# Force redeploy from CLI
+vercel --prod
+
+# If vercel CLI is not linked, re-link first
+cd ~/project_cv/MaPic/frontend && vercel link --yes
+```
+
+**Production branch:** Set to `vercel/conf` in Vercel Dashboard > Settings > Git > Production Branch.
+
+---
+
 ## Problem: Supabase auth not working on Vercel
 
 The frontend needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` baked into the build.
