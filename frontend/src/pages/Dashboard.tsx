@@ -50,6 +50,7 @@ export default function Dashboard({ session }: DashboardProps) {
   const [tunnelDashboardUrl, setTunnelDashboardUrl] = useState('')
   const [tunnelDismissed, setTunnelDismissed] = useState(false)
   const hadCurrentUserGenerationWorkRef = useRef(false)
+  const completionSyncRequestIdRef = useRef(0)
   const pendingGenerationCount = Object.keys(pendingGenerations).length
   const optimisticPendingCount = Object.values(pendingGenerations).filter(pending =>
     !activeGenerations.some(gen => gen.user_id === session.user.id && gen.prompt === pending.prompt)
@@ -160,6 +161,7 @@ export default function Dashboard({ session }: DashboardProps) {
 
   useEffect(() => {
     let isCancelled = false
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
 
     if (hasCurrentUserGenerationWork) {
       hadCurrentUserGenerationWorkRef.current = true
@@ -174,26 +176,61 @@ export default function Dashboard({ session }: DashboardProps) {
     }
 
     hadCurrentUserGenerationWorkRef.current = false
-    setIsViewingActiveGeneration(false)
-    setIsNewGenerationDraft(false)
+    const syncRequestId = completionSyncRequestIdRef.current + 1
+    completionSyncRequestIdRef.current = syncRequestId
 
-    void queryClient.fetchQuery({
-      queryKey: ['history', session.user.id],
-      queryFn: () => api.getHistory(session.user.id),
-    }).then((items) => {
-      if (isCancelled) return
-      const generatedPngHistory = selectGeneratedPngHistory(items)
-      queryClient.setQueryData(['history', session.user.id], generatedPngHistory)
-      if (generatedPngHistory[0]) {
-        setCurrentGen(generatedPngHistory[0])
-      }
-    }).catch((error) => {
-      if (!isCancelled) {
-        console.error(error)
-      }
-    })
+    const syncHistoryAfterCompletion = async (allowRetry: boolean) => {
+      try {
+        const items = await queryClient.fetchQuery({
+          queryKey: ['history', session.user.id],
+          queryFn: () => api.getHistory(session.user.id),
+        })
+        if (isCancelled || syncRequestId !== completionSyncRequestIdRef.current) return
 
-    return () => { isCancelled = true }
+        const generatedPngHistory = selectGeneratedPngHistory(items)
+        queryClient.setQueryData(['history', session.user.id], generatedPngHistory)
+
+        let hasFocusedGeneration = false
+        setCurrentGen((prev) => {
+          if (prev) {
+            hasFocusedGeneration = true
+            return prev
+          }
+
+          if (generatedPngHistory[0]) {
+            hasFocusedGeneration = true
+            return generatedPngHistory[0]
+          }
+
+          return prev
+        })
+
+        if (!hasFocusedGeneration && allowRetry) {
+          retryTimer = setTimeout(() => {
+            if (!isCancelled && syncRequestId === completionSyncRequestIdRef.current) {
+              void syncHistoryAfterCompletion(false)
+            }
+          }, 1200)
+          return
+        }
+
+        if (hasFocusedGeneration) {
+          setIsViewingActiveGeneration(false)
+          setIsNewGenerationDraft(false)
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          console.error(error)
+        }
+      }
+    }
+
+    void syncHistoryAfterCompletion(true)
+
+    return () => {
+      isCancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
+    }
   }, [
     currentGen,
     hasCurrentUserGenerationWork,
@@ -226,7 +263,7 @@ export default function Dashboard({ session }: DashboardProps) {
 
     void api.generateImage(prompt, session.user.id, images, options)
       .then((newGen) => {
-        queryClient.setQueryData(['history', session.user.id], (old: Generation[] = []) => [newGen, ...old])
+        queryClient.setQueryData(['history', session.user.id], (old: Generation[] = []) => [newGen, ...old.filter(item => item.id !== newGen.id)])
         setCurrentGen(newGen)
         setIsViewingActiveGeneration(false)
         setIsNewGenerationDraft(false)

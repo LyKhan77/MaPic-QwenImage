@@ -10,11 +10,12 @@ export function shouldShowActiveGenerationView({
   hasCurrentUserGenerationWork,
   isViewingActiveGeneration,
 }: {
-  currentGeneration: unknown | null
+  currentGeneration: { public_url?: string | null } | null
   hasCurrentUserGenerationWork: boolean
   isViewingActiveGeneration: boolean
 }): boolean {
-  return isViewingActiveGeneration && !currentGeneration && hasCurrentUserGenerationWork
+  const hasRenderableGeneration = Boolean(currentGeneration?.public_url)
+  return isViewingActiveGeneration && !hasRenderableGeneration && hasCurrentUserGenerationWork
 }
 
 export function didGenerationWorkComplete(

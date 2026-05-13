@@ -13,7 +13,7 @@ MaPic turns text prompts and reference images into production-quality visuals wi
 *   **Local GPU Inference:** GLM-Image server runs locally on CUDA GPUs with no cloud inference cost or rate limit.
 *   **Model Load Controls:** The UI can load and unload the model. The inference server also unloads from VRAM after 1 hour of inactivity.
 *   **Generation Queue:** Users can submit another prompt while a generation is active by clicking **New Generation**. The active loading view stays read-only.
-*   **Active Generation Recovery:** The active generation indicator shows queued/running/saving jobs, rehydrates the current user's active job view after refresh, and opens the newest completed result automatically.
+*   **Active Generation Recovery:** The active generation indicator shows queued/running/saving jobs, rehydrates the current user's active job view after refresh, and auto-focuses the latest finished result (including multi-queue completion order).
 *   **Configurable Generation Params:** Frontend exposes `num_inference_steps` and `guidance_scale`.
 *   **History Management:** Generated images and prompts are saved to Supabase and can be viewed, selected, or deleted.
 *   **Secure Auth:** Google OAuth 2.0 via Supabase Authentication.
