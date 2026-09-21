@@ -2,16 +2,26 @@ import asyncio
 import base64
 import gc
 import io
+import json
 import logging
-import math
+import os
 import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
-import json
+import torch
+from diffusers import QwenImage21Pipeline
+from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
+from PIL import Image
+from pydantic import BaseModel
+
+logger = logging.getLogger("qwen_image_server")
+pipe: QwenImage21Pipeline | None = None
+_executor = ThreadPoolExecutor(max_workers=1)
+_inference_lock = asyncio.Lock()
 
 last_request_time = time.time()
 is_unloaded = True
@@ -19,59 +29,44 @@ is_loading = False
 loading_progress = 0
 loading_message = ""
 
+
 def update_progress(prog: int, msg: str):
     global loading_progress, loading_message
     loading_progress = prog
     loading_message = msg
 
-import torch
-from diffusers.pipelines.glm_image import GlmImagePipeline
-from fastapi import FastAPI
-from PIL import Image
-from pydantic import BaseModel
-
-logger = logging.getLogger("glm_image_server")
-pipe: GlmImagePipeline | None = None
-_executor = ThreadPoolExecutor(max_workers=1)
-_inference_lock = asyncio.Lock()
 
 # Thread-safe generation state for stage tracking
 _gen_state = {"stage": "idle", "step": 0, "total_steps": 0}
 _gen_lock = threading.Lock()
 
-STAGE_NAMES = ["warmup", "encoding", "ar_sampling", "diffusion", "decoding"]
+STAGE_NAMES = ["warmup", "encoding", "diffusion", "decoding"]
+
 
 def update_gen_state(stage: str, step: int = 0, total_steps: int = 0):
     with _gen_lock:
         _gen_state.update({"stage": stage, "step": step, "total_steps": total_steps})
 
+
 def get_gen_state():
     with _gen_lock:
         return dict(_gen_state)
 
-def make_diffusion_callback(total_steps: int):
-    first_call = True
 
+def make_diffusion_callback(total_steps: int):
     def callback(pipeline, step_index, t, callback_kwargs):
-        nonlocal first_call
-        if first_call:
-            update_gen_state("ar_sampling", step=0, total_steps=total_steps)
-            first_call = False
-        stage = "ar_sampling" if step_index < total_steps * 0.4 else "diffusion"
-        update_gen_state(stage, step=step_index + 1, total_steps=total_steps)
+        update_gen_state("diffusion", step=step_index + 1, total_steps=total_steps)
         return callback_kwargs
     return callback
 
-# GPU indices as seen by PyTorch (verified 2026-05-06):
-#   GPU 0 = RTX 4090 (24 GB, Ada Lovelace)
-#   GPU 1 = RTX 5080 (16 GB, Blackwell)
-#   GPU 2 = RTX 5080 (16 GB, Blackwell)
-MAX_MEMORY = {
-    0: "22GiB",    # RTX 4090
-    1: "13GiB",    # RTX 5080 (Leaving ~3GB for I2I activations)
-    2: "13GiB",    # RTX 5080 (Leaving ~3GB for I2I activations)
-    "cpu": "4GiB", # Safety net to prevent "meta" device hangs
-}
+
+# Qwen-Image 2.1: 7B single-stream DiT + Qwen3-VL 8B text encoder + 64-channel VAE.
+# QWEN_MAX_MEMORY drives accelerate's balanced sharding across the available GPUs.
+MAX_MEMORY = json.loads(os.getenv("QWEN_MAX_MEMORY", '{"cpu": "8GiB"}'))
+# CPU offload skips per-GPU sharding and streams modules on demand: less VRAM, much slower.
+USE_CPU_OFFLOAD = os.getenv("QWEN_CPU_OFFLOAD", "0") == "1"
+# Low-VRAM hosts cap the output resolution so oversized requests fail fast instead of OOM.
+MAX_RESOLUTION = int(os.getenv("QWEN_MAX_RESOLUTION", "2048"))
 
 
 def _preflight_check():
@@ -87,10 +82,11 @@ def _preflight_check():
                      i, props.name, props.total_memory / 1024**2,
                      props.major, props.minor)
 
-    # RTX 5080 = Blackwell (sm_120) — needs PyTorch >= 2.6
-    if num_gpus >= 2 and "sm_120" not in arch_list:
+    # Blackwell (sm_120) needs PyTorch >= 2.6 with CUDA 12.8
+    has_blackwell = any(torch.cuda.get_device_properties(i).major == 12 for i in range(num_gpus))
+    if has_blackwell and "sm_120" not in arch_list:
         logger.warning(
-            "RTX 5080 detected but sm_120 not in compiled archs. "
+            "Blackwell (sm_120) GPU detected but sm_120 not in compiled archs. "
             "Upgrade PyTorch to >= 2.6 with CUDA 12.8 for native Blackwell support."
         )
 
@@ -152,24 +148,24 @@ def load_model():
         _log_gpu_memory("before_load")
 
         try:
-            update_progress(15, "Loading pipeline weights (8-bit, balanced)...")
-            logger.info("Loading GLM-Image pipeline (8-bit, device_map=balanced)...")
+            update_progress(15, "Loading pipeline weights (bf16)...")
+            logger.info("Loading Qwen-Image 2.1 pipeline...")
 
-            from diffusers.quantizers import PipelineQuantizationConfig
-            quantization_config = PipelineQuantizationConfig(
-                quant_backend="bitsandbytes_8bit",
-                quant_kwargs={"load_in_8bit": True},
-            )
-
-            # Load with balanced map first to handle the massive transformer weights
-            pipe = GlmImagePipeline.from_pretrained(
-                "zai-org/GLM-Image",
-                torch_dtype=torch.bfloat16,
-                quantization_config=quantization_config,
-                device_map="balanced",
-                max_memory=MAX_MEMORY,
-            )
-            logger.info("GLM-Image pipeline loaded (8-bit, device_map=balanced).")
+            if USE_CPU_OFFLOAD:
+                pipe = QwenImage21Pipeline.from_pretrained(
+                    "Qwen/Qwen-Image-2.1",
+                    torch_dtype=torch.bfloat16,
+                )
+                pipe.enable_model_cpu_offload()
+                logger.info("Qwen-Image 2.1 loaded (model CPU offload).")
+            else:
+                pipe = QwenImage21Pipeline.from_pretrained(
+                    "Qwen/Qwen-Image-2.1",
+                    torch_dtype=torch.bfloat16,
+                    device_map="balanced",
+                    max_memory=MAX_MEMORY,
+                )
+                logger.info("Qwen-Image 2.1 loaded (device_map=balanced).")
 
             # Enable VAE slicing & tiling to reduce peak memory during encode/decode
             try:
@@ -184,17 +180,7 @@ def load_model():
             except Exception as exc:
                 logger.warning("VAE tiling not available: %s", exc)
 
-            # Enable attention slicing on transformer to reduce activation memory
             update_progress(80, "Enabling memory optimizations...")
-            try:
-                if hasattr(pipe, "transformer") and hasattr(pipe.transformer, "enable_attention_slicing"):
-                    pipe.transformer.enable_attention_slicing("auto")
-                    logger.info("Transformer attention slicing enabled.")
-                elif hasattr(pipe, "enable_attention_slicing"):
-                    pipe.enable_attention_slicing("auto")
-                    logger.info("Pipeline attention slicing enabled.")
-            except Exception as exc:
-                logger.warning("Attention slicing not available: %s", exc)
 
             # Enable Flash SDP + memory-efficient SDP for attention
             if hasattr(torch.backends.cuda, "enable_flash_sdp"):
@@ -204,30 +190,14 @@ def load_model():
                 torch.backends.cuda.enable_mem_efficient_sdp(True)
                 logger.info("Memory-efficient SDP enabled.")
 
-            # torch.compile the transformer for faster diffusion denoising
-            # Disabled to save VRAM for activations in BF16 mode
-            # update_progress(85, "Compiling transformer...")
-            # try:
-            #     torch.set_float32_matmul_precision("high")
-            #     pipe.transformer.to(memory_format=torch.channels_last)
-            #     pipe.transformer = torch.compile(pipe.transformer, mode="reduce-overhead")
-            #     logger.info("Transformer compiled (reduce-overhead mode).")
-            # except Exception as exc:
-            #     logger.warning("torch.compile not available or failed: %s", exc)
-
             global is_unloaded
             is_unloaded = False
             update_progress(95, "Finalizing...")
-            # Set AR sampling params to model-recommended defaults
-            pipe.vision_language_encoder.generation_config.temperature = 0.9
-            pipe.vision_language_encoder.generation_config.top_p = 0.75
-            pipe.vision_language_encoder.generation_config.do_sample = True
-            logger.info("AR sampling config: temperature=0.9, top_p=0.75, do_sample=True")
 
             _log_device_map()
             _log_gpu_memory("after_load")
             update_progress(100, "Ready.")
-            logger.info("GLM-Image pipeline ready (BF16, device_map=balanced).")
+            logger.info("Qwen-Image 2.1 pipeline ready.")
         except Exception as exc:
             update_progress(0, f"Error: {exc}")
             raise
@@ -265,7 +235,7 @@ async def lifespan(app: FastAPI):
     task.cancel()
 
 
-app = FastAPI(title="GLM-Image Server", lifespan=lifespan)
+app = FastAPI(title="Qwen-Image 2.1 Server", lifespan=lifespan)
 
 # Suppress access logs for successful polling GETs to reduce log noise
 class _QuietPollingFilter(logging.Filter):
@@ -280,25 +250,39 @@ logging.getLogger("uvicorn.access").addFilter(_QuietPollingFilter())
 
 class T2IRequest(BaseModel):
     prompt: str
-    size: str = "1024x1024"
+    negative_prompt: str | None = None
+    true_cfg_scale: float = 1.0
+    resolution: int = 2048
+    size: str | None = None
     response_format: str = "b64_json"
-    num_inference_steps: int = 50
-    guidance_scale: float = 1.5
+    num_inference_steps: int = 40
 
 
 class I2IRequest(BaseModel):
     prompt: str
     images: list[str]
-    size: str = "1024x1024"
+    negative_prompt: str | None = None
+    true_cfg_scale: float = 1.0
+    resolution: int = 2048
+    size: str | None = None
     response_format: str = "b64_json"
-    num_inference_steps: int = 35
-    guidance_scale: float = 1.5
+    num_inference_steps: int = 40
 
 
 def _snap_to_32(size: str) -> tuple[int, int]:
     parts = size.lower().split("x")
     w, h = int(parts[0]), int(parts[1])
-    return (math.ceil(w / 32) * 32, math.ceil(h / 32) * 32)
+    multiple_of = 32
+    return (max(multiple_of, w // multiple_of * multiple_of),
+            max(multiple_of, h // multiple_of * multiple_of))
+
+
+def _effective_cfg(req: T2IRequest | I2IRequest) -> float:
+    # Qwen-Image 2.1 samples without guidance by default: true_cfg_scale only takes effect
+    # together with a negative prompt, and it doubles the work per denoising step.
+    if req.true_cfg_scale > 1 and req.negative_prompt:
+        return req.true_cfg_scale
+    return 1.0
 
 
 def _run_inference(fn):
@@ -414,19 +398,29 @@ async def text_to_image(req: T2IRequest):
         last_request_time = time.time()
         if pipe is None:
             return {"error": "Model failed to load"}
+        if req.resolution > MAX_RESOLUTION:
+            return {"error": f"Resolution {req.resolution} exceeds this server's limit of {MAX_RESOLUTION}"}
 
-        width, height = _snap_to_32(req.size)
-        logger.info("T2I: prompt=%r size=%dx%d", req.prompt[:80], width, height)
+        if req.size:
+            width, height = _snap_to_32(req.size)
+        else:
+            width = height = req.resolution
+
+        cfg_scale = _effective_cfg(req)
+        logger.info("T2I: prompt=%r size=%dx%d steps=%d cfg=%.2f",
+                    req.prompt[:80], width, height, req.num_inference_steps, cfg_scale)
         update_gen_state("warmup")
 
         def run():
             update_gen_state("encoding")
             result = pipe(
                 prompt=req.prompt,
+                negative_prompt=req.negative_prompt,
+                true_cfg_scale=cfg_scale,
                 width=width,
                 height=height,
+                output_resolution=req.resolution,
                 num_inference_steps=req.num_inference_steps,
-                guidance_scale=req.guidance_scale,
                 callback_on_step_end=make_diffusion_callback(req.num_inference_steps),
                 callback_on_step_end_tensor_inputs=["latents"],
             )
@@ -447,11 +441,26 @@ async def image_to_image(req: I2IRequest):
         last_request_time = time.time()
         if pipe is None:
             return {"error": "Model failed to load"}
+        if req.resolution > MAX_RESOLUTION:
+            return {"error": f"Resolution {req.resolution} exceeds this server's limit of {MAX_RESOLUTION}"}
 
-        width, height = _snap_to_32(req.size)
+        if not req.images:
+            return {"error": "At least one reference image is required"}
+        if len(req.images) > 10:
+            return {"error": "Qwen-Image 2.1 supports at most 10 reference images"}
+
+        # Condition images are handed over untouched: the pipeline resizes each one into its
+        # own aspect-ratio bucket before the text encoder and the VAE read them.
         ref_images = [_b64_to_pil(b).convert("RGB") for b in req.images]
-        ref_images = [img.resize((width, height), Image.LANCZOS) for img in ref_images]
-        logger.info("I2I: prompt=%r refs=%d size=%dx%d", req.prompt[:80], len(ref_images), width, height)
+
+        width = height = None
+        if req.size:
+            width, height = _snap_to_32(req.size)
+
+        cfg_scale = _effective_cfg(req)
+        logger.info("I2I: prompt=%r refs=%d size=%s steps=%d cfg=%.2f",
+                    req.prompt[:80], len(ref_images), req.size or f"auto@{req.resolution}",
+                    req.num_inference_steps, cfg_scale)
         update_gen_state("warmup")
 
         def run():
@@ -459,10 +468,12 @@ async def image_to_image(req: I2IRequest):
             result = pipe(
                 prompt=req.prompt,
                 image=ref_images,
-                height=height,
+                negative_prompt=req.negative_prompt,
+                true_cfg_scale=cfg_scale,
                 width=width,
+                height=height,
+                output_resolution=req.resolution,
                 num_inference_steps=req.num_inference_steps,
-                guidance_scale=req.guidance_scale,
                 callback_on_step_end=make_diffusion_callback(req.num_inference_steps),
                 callback_on_step_end_tensor_inputs=["latents"],
             )
