@@ -16,7 +16,6 @@ interface StageInfo {
 const STAGES: StageInfo[] = [
   { key: 'warmup', label: 'Pipeline warmup' },
   { key: 'encoding', label: 'Prompt encoding' },
-  { key: 'ar_sampling', label: 'AR sampling' },
   { key: 'diffusion', label: 'Diffusion denoising' },
   { key: 'decoding', label: 'VAE decoding' },
 ]

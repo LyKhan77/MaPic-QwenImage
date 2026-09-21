@@ -9,7 +9,7 @@ import PromptInput from '../components/PromptInput'
 import ModelStatusBadge from '../components/ModelStatusBadge'
 import GenerationStageBadge from '../components/GenerationStageBadge'
 import ActiveGenerationsIndicator from '../components/ActiveGenerationsIndicator'
-import type { Generation, ActiveGeneration } from '../types'
+import type { Generation, ActiveGeneration, GenerationTimeParams } from '../types'
 import type { GenerationOptions } from '../components/PromptInput'
 import { Toaster, toast } from 'sonner'
 import {
@@ -39,7 +39,7 @@ export default function Dashboard({ session }: DashboardProps) {
   const queryClient = useQueryClient()
   const [currentGen, setCurrentGen] = useState<Generation | null>(null)
   const [loadElapsed, setLoadElapsed] = useState(0)
-  const [pendingGenParams, setPendingGenParams] = useState<{ steps: number; numRefImages: number } | null>(null)
+  const [pendingGenParams, setPendingGenParams] = useState<GenerationTimeParams | null>(null)
   const [genKey, setGenKey] = useState(0)
   const [pendingGenerations, setPendingGenerations] = useState<Record<string, PendingGeneration>>({})
   const [activeGenerations, setActiveGenerations] = useState<ActiveGeneration[]>([])
@@ -257,8 +257,10 @@ export default function Dashboard({ session }: DashboardProps) {
     setIsNewGenerationDraft(false)
     setGenKey((prev) => prev + 1)
     setPendingGenParams({
-      steps: options?.num_inference_steps ?? 50,
+      steps: options?.num_inference_steps ?? 40,
       numRefImages: images?.length ?? 0,
+      resolution: options?.resolution ?? 2048,
+      cfgEnabled: Boolean(options?.true_cfg_scale && options.true_cfg_scale > 1),
     })
 
     void api.generateImage(prompt, session.user.id, images, options)
@@ -385,7 +387,7 @@ export default function Dashboard({ session }: DashboardProps) {
              <GenerationStageBadge
                key={`stage-${genKey}`}
                isLoading={hasCurrentUserGenerationWork}
-               steps={displayedGenParams?.steps ?? 50}
+               steps={displayedGenParams?.steps ?? 40}
                numRefImages={displayedGenParams?.numRefImages ?? 0}
              />
            </div>

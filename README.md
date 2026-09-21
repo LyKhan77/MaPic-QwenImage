@@ -2,19 +2,20 @@
 
 **Developed by Lee Khan** | *Synthesizing the Future*
 
-MaPic turns text prompts and reference images into production-quality visuals with local GLM-Image inference. The production frontend is deployed on Vercel, while the backend and GPU inference stack run on local hardware and are exposed to the frontend through Cloudflare Tunnel.
+MaPic turns text prompts and reference images into production-quality visuals with local Qwen-Image 2.1 inference. The production frontend is deployed on Vercel, while the backend and GPU inference stack run on local hardware and are exposed to the frontend through Cloudflare Tunnel.
 
 ## 🚀 Features
 
-*   **AI Image Generation:** Generate images with GLM-Image using a local diffusers pipeline.
-*   **Multi-Reference Support:** Attach up to 3 reference images for image-to-image generation, style transfer, editing, and identity-preserving workflows.
+*   **AI Image Generation:** Generate images with Qwen-Image 2.1 (7B single-stream DiT + Qwen3-VL encoder) using a local diffusers pipeline.
+*   **Multi-Reference Support:** Attach up to 10 reference images for image-to-image generation, style transfer, editing, and identity-preserving workflows.
+*   **Native 2K & Transparent Output:** Pick 1K or 2K output, and generate RGBA images with a transparent background.
 *   **Production Frontend on Vercel:** React SPA is served from `https://mapic-glm.vercel.app`.
 *   **Cloudflare Tunnel Backend Access:** Vercel frontend communicates with the local backend through a public tunnel URL.
-*   **Local GPU Inference:** GLM-Image server runs locally on CUDA GPUs with no cloud inference cost or rate limit.
+*   **Local GPU Inference:** The Qwen-Image 2.1 server runs locally on CUDA GPUs with no cloud inference cost or rate limit.
 *   **Model Load Controls:** The UI can load and unload the model. The inference server also unloads from VRAM after 1 hour of inactivity.
 *   **Generation Queue:** Users can submit another prompt while a generation is active by clicking **New Generation**. The active loading view stays read-only.
 *   **Active Generation Recovery:** The active generation indicator shows queued/running/saving jobs, rehydrates the current user's active job view after refresh, and auto-focuses the latest finished result (including multi-queue completion order).
-*   **Configurable Generation Params:** Frontend exposes `num_inference_steps` and `guidance_scale`.
+*   **Configurable Generation Params:** Frontend exposes `num_inference_steps`, True CFG scale (with negative prompt), and 1K/2K resolution.
 *   **History Management:** Generated images and prompts are saved to Supabase and can be viewed, selected, or deleted.
 *   **Secure Auth:** Google OAuth 2.0 via Supabase Authentication.
 *   **Responsive UI:** Collapsible sidebar, dark/light mode, Framer Motion animations, and mobile-friendly layout.
@@ -33,9 +34,9 @@ User Browser
     +--> Cloudflare Edge --> Named Tunnel --> Local Backend :8181
             (https://api.mapic-backend.site)
                                               |
-                                              +--> GLM-Image Server :30000
+                                              +--> Qwen-Image Server :30000
                                                      |
-                                                     +--> diffusers GlmImagePipeline
+                                                     +--> diffusers QwenImage21Pipeline
 ```
 
 ### Local Development Flow
@@ -45,9 +46,9 @@ Frontend (React/Vite :5151)
     |
     +--> MaPic Backend (FastAPI :8181)
             |
-            +--> GLM-Image Server (FastAPI :30000)
+            +--> Qwen-Image Server (FastAPI :30000)
                     |
-                    +--> GLM-Image local pipeline
+                    +--> Qwen-Image 2.1 local pipeline
 ```
 
 ## 🌐 Current Deployment
@@ -58,7 +59,7 @@ Frontend (React/Vite :5151)
 | Backend tunnel | `https://api.mapic-backend.site` | Named tunnel — permanent URL |
 | Backend health | `https://api.mapic-backend.site/api/health` | Public health check through tunnel |
 | Backend local | `http://localhost:8181/api/health` | Local backend health check |
-| GLM-Image local | `http://localhost:30000/health` | Local inference server health check |
+| Qwen-Image local | `http://localhost:30000/health` | Local inference server health check |
 
 For Vercel and Cloudflare Tunnel troubleshooting, see [vercel-docs.md](vercel-docs.md).
 
@@ -77,14 +78,14 @@ For Vercel and Cloudflare Tunnel troubleshooting, see [vercel-docs.md](vercel-do
 *   **Framework:** Python FastAPI
 *   **Database & Storage:** Supabase PostgreSQL + Storage
 *   **Tunnel:** Cloudflare Tunnel to local `:8181`
-*   **AI Service Client:** HTTP client to GLM-Image server
+*   **AI Service Client:** HTTP client to the Qwen-Image 2.1 server
 
 ### Inference Server
 *   **Framework:** Python FastAPI + Uvicorn
-*   **Model:** GLM-Image (`zai-org/GLM-Image`, 9B AR + 7B diffusion decoder)
-*   **Runtime:** PyTorch, CUDA, diffusers, transformers, bitsandbytes 8-bit quantization
-*   **Hardware Target:** RTX 4090 24 GB + 2x RTX 5080 16 GB
-*   **Optimizations:** Balanced device map, explicit `MAX_MEMORY`, VAE slicing/tiling, attention slicing, Flash SDP, memory-efficient SDP
+*   **Model:** Qwen-Image 2.1 (`Qwen/Qwen-Image-2.1`, 7B single-stream DiT + Qwen3-VL 8B encoder + 64-channel RGBA VAE)
+*   **Runtime:** PyTorch (CUDA 12.8), diffusers `QwenImage21Pipeline` (git main), transformers >= 5.17
+*   **Hardware Target:** Multi-GPU NVIDIA; set `QWEN_MAX_MEMORY` per host, or `QWEN_CPU_OFFLOAD=1` for limited VRAM
+*   **Optimizations:** Balanced device map, explicit `MAX_MEMORY`, VAE slicing/tiling, Flash SDP, memory-efficient SDP, prefix KV cache reuse
 *   **Note:** `torch.compile` is currently disabled in code to preserve VRAM for activations.
 
 ## 📦 Installation & Setup
@@ -100,14 +101,14 @@ For Vercel and Cloudflare Tunnel troubleshooting, see [vercel-docs.md](vercel-do
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/LyKhan77/MaPic-GLM.git
-cd MaPic-GLM
+git clone git@github.com:LyKhan77/MaPic-QwenImage.git
+cd MaPic-QwenImage
 ```
 
-### 2. GLM-Image Server Setup
+### 2. Qwen-Image 2.1 Server Setup
 
 ```bash
-cd glm_image_server
+cd qwen_image_server
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -119,7 +120,7 @@ Start the server:
 python -m uvicorn main:app --host 0.0.0.0 --port 30000
 ```
 
-The first model load downloads GLM-Image weights from Hugging Face.
+The first model load downloads Qwen-Image 2.1 weights from Hugging Face (~47 GB). Before deploying on a new host, run `python smoke_test.py --resolution 2048` to measure peak VRAM and generation time for that machine.
 
 ### 3. Backend Setup
 
@@ -135,7 +136,8 @@ Create `backend/.env`:
 ```env
 SUPABASE_URL="https://your-project.supabase.co"
 SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
-GLM_IMAGE_API_URL="http://localhost:30000"
+QWEN_IMAGE_API_URL="http://localhost:30000"
+QWEN_DEFAULT_RESOLUTION="2048"
 CORS_ORIGINS="http://localhost:5151,http://localhost:5152,https://mapic-glm.vercel.app"
 ```
 
@@ -169,7 +171,7 @@ npm run dev
 Local URLs:
 *   Frontend: `http://localhost:5151`
 *   Backend: `http://localhost:8181`
-*   GLM-Image Server: `http://localhost:30000`
+*   Qwen-Image Server: `http://localhost:30000`
 
 ### 5. Start All Local Services
 
@@ -179,7 +181,7 @@ From project root:
 bash start-app.sh
 ```
 
-This starts GLM-Image server, backend, and local Vite frontend. In production, the frontend is served by Vercel, so the local Vite frontend is optional.
+This starts the Qwen-Image 2.1 server, backend, and local Vite frontend. In production, the frontend is served by Vercel, so the local Vite frontend is optional.
 
 ## 🚢 Production Frontend + Tunnel
 
@@ -215,7 +217,7 @@ The frontend is a static React SPA. `frontend/vercel.json` rewrites all routes t
 ## ✅ Health Checks
 
 ```bash
-# GLM-Image server
+# Qwen-Image server
 curl -s http://localhost:30000/health
 
 # Backend local
@@ -235,8 +237,8 @@ curl -s https://api.mapic-backend.site/openapi.json \
 1.  Open `https://mapic-glm.vercel.app` or local frontend `http://localhost:5151`.
 2.  Login with Google through Supabase Auth.
 3.  Type a prompt in the bottom prompt input.
-4.  Optionally attach up to 3 reference images.
-5.  Adjust inference steps or guidance scale if needed.
+4.  Optionally attach up to 10 reference images.
+5.  Adjust inference steps, True CFG scale with a negative prompt, or the 1K/2K resolution if needed.
 6.  Click **Generate** or press Enter.
 7.  During generation, the loading view is read-only. Use **New Generation** to open a clean prompt and submit another request while the current job continues.
 8.  Track queued/running/saving jobs in the active generation indicator, or click your active job to refocus the loader.

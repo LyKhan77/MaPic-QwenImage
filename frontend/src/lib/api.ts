@@ -63,11 +63,18 @@ export const api = {
     return res.json()
   },
 
-  async generateImage(prompt: string, userId: string, images?: string[], options?: { num_inference_steps?: number; guidance_scale?: number }) {
+  async generateImage(
+    prompt: string,
+    userId: string,
+    images?: string[],
+    options?: { num_inference_steps?: number; true_cfg_scale?: number; negative_prompt?: string; resolution?: 1024 | 2048 },
+  ) {
     const body: Record<string, unknown> = { prompt, user_id: userId }
     if (images) body.images = images
     if (options?.num_inference_steps) body.num_inference_steps = options.num_inference_steps
-    if (options?.guidance_scale) body.guidance_scale = options.guidance_scale
+    if (options?.true_cfg_scale) body.true_cfg_scale = options.true_cfg_scale
+    if (options?.negative_prompt) body.negative_prompt = options.negative_prompt
+    if (options?.resolution) body.resolution = options.resolution
 
     const res = await fetch(`${API_URL}/generate`, {
       method: 'POST',

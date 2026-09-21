@@ -5,7 +5,9 @@ import type { ModelStatus } from '../lib/api'
 
 export interface GenerationOptions {
   num_inference_steps?: number
-  guidance_scale?: number
+  true_cfg_scale?: number
+  negative_prompt?: string
+  resolution?: 1024 | 2048
 }
 
 interface PromptInputProps {
@@ -24,8 +26,10 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
   const [showReferences, setShowReferences] = useState(true)
   const [images, setImages] = useState<{ id: string; base64: string }[]>([])
   const [showSettings, setShowSettings] = useState(false)
-  const [steps, setSteps] = useState(50)
-  const [guidance, setGuidance] = useState(1.5)
+  const [steps, setSteps] = useState(40)
+  const [cfgScale, setCfgScale] = useState(1.0)
+  const [negativePrompt, setNegativePrompt] = useState('')
+  const [resolution, setResolution] = useState<1024 | 2048>(2048)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const isModelReady = modelStatus === 'ready' || modelStatus === undefined
@@ -80,8 +84,8 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
     const files = Array.from(e.target.files || [])
     if (!files.length) return
 
-    if (images.length + files.length > 3) {
-      alert('You can only upload up to 3 images.')
+    if (images.length + files.length > 10) {
+      alert('You can only upload up to 10 images.')
       return
     }
 
@@ -120,8 +124,12 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
       : undefined;
 
     const options: GenerationOptions = {}
-    if (steps !== 50) options.num_inference_steps = steps
-    if (guidance !== 1.5) options.guidance_scale = guidance
+    if (steps !== 40) options.num_inference_steps = steps
+    if (cfgScale > 1 && negativePrompt.trim()) {
+      options.true_cfg_scale = cfgScale
+      options.negative_prompt = negativePrompt.trim()
+    }
+    if (resolution !== 2048) options.resolution = resolution
 
     onGenerate(prompt, cleanImages, Object.keys(options).length > 0 ? options : undefined)
     setPrompt('')
@@ -167,9 +175,9 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
           />
           <button
              onClick={() => fileInputRef.current?.click()}
-             disabled={images.length >= 3 || !isModelReady}
+             disabled={images.length >= 10 || !isModelReady}
              className={`flex shrink-0 items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-10 w-10 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-2 text-muted-foreground hover:text-foreground'}`}
-             title="Attach reference image (Max 3, 2MB each)"
+             title="Attach reference image (Max 10, 2MB each)"
           >
              <Paperclip size={isCentralized ? 18 : 20} />
           </button>
@@ -286,7 +294,7 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
                         <label className="text-xs font-mono text-muted-foreground">Steps</label>
                         <Info size={13} className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors" />
                         <div className="absolute left-0 bottom-full mb-2 w-56 bg-popover text-popover-foreground text-[11px] leading-relaxed rounded-md px-2.5 py-2 shadow-lg border border-border z-20 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 translate-y-1 group-hover:translate-y-0">
-                          Number of denoising iterations. More steps yield finer detail but take longer.
+                          Number of denoising iterations. Qwen-Image 2.1 direkomendasikan 40 steps.
                           <div className="absolute left-4 top-full -mt-px w-2 h-2 bg-popover border-r border-b border-border rotate-45" />
                         </div>
                       </div>
@@ -306,24 +314,54 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5 group relative">
-                        <label className="text-xs font-mono text-muted-foreground">Guidance</label>
+                        <label className="text-xs font-mono text-muted-foreground">True CFG</label>
                         <Info size={13} className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors" />
                         <div className="absolute left-0 bottom-full mb-2 w-56 bg-popover text-popover-foreground text-[11px] leading-relaxed rounded-md px-2.5 py-2 shadow-lg border border-border z-20 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 translate-y-1 group-hover:translate-y-0">
-                          How strongly the output follows your prompt. Higher values = stricter adherence.
+                          Classifier-free guidance. 1.0 = off (rekomendasi Qwen). Nilai di atas 1 hanya aktif bila Negative Prompt diisi, dan membuat setiap step 2x lebih berat.
                           <div className="absolute left-4 top-full -mt-px w-2 h-2 bg-popover border-r border-b border-border rotate-45" />
                         </div>
                       </div>
-                      <span className="text-xs font-mono text-foreground tabular-nums">{guidance.toFixed(1)}</span>
+                      <span className="text-xs font-mono text-foreground tabular-nums">{cfgScale.toFixed(1)}</span>
                     </div>
                     <input
                       type="range"
                       min={1.0}
-                      max={5.0}
+                      max={3.0}
                       step={0.1}
-                      value={guidance}
-                      onChange={(e) => setGuidance(Number(e.target.value))}
+                      value={cfgScale}
+                      onChange={(e) => setCfgScale(Number(e.target.value))}
                       className="w-full h-1 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
                     />
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="text-xs font-mono text-muted-foreground">Negative Prompt</label>
+                    <textarea
+                      value={negativePrompt}
+                      onChange={(e) => setNegativePrompt(e.target.value)}
+                      placeholder="Hal yang ingin dihindari (wajib agar True CFG aktif)"
+                      rows={2}
+                      className="w-full resize-none rounded-md bg-muted/30 px-2.5 py-2 text-xs text-foreground ring-1 ring-border focus:outline-none focus:ring-primary/50"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="text-xs font-mono text-muted-foreground">Resolution</label>
+                    <div className="flex gap-2">
+                      {([1024, 2048] as const).map((r) => (
+                        <button
+                          key={r}
+                          onClick={() => setResolution(r)}
+                          className={`flex-1 rounded-md py-1.5 text-xs font-mono ring-1 transition-colors ${
+                            resolution === r
+                              ? 'bg-primary/15 text-primary ring-primary/50'
+                              : 'text-muted-foreground ring-border hover:text-foreground'
+                          }`}
+                        >
+                          {r / 1024}K
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </motion.div>

@@ -6,6 +6,8 @@ interface GenerationTimeDisplayProps {
   isLoading: boolean
   steps: number
   numRefImages: number
+  resolution?: number
+  cfgEnabled?: boolean
 }
 
 function formatTime(totalSeconds: number): string {
@@ -18,12 +20,14 @@ export default function GenerationTimeDisplay({
   isLoading,
   steps,
   numRefImages,
+  resolution = 2048,
+  cfgEnabled = false,
 }: GenerationTimeDisplayProps) {
   const [elapsed, setElapsed] = useState(0)
 
   const estimatedTotal = useMemo(
-    () => estimateTotalSeconds(steps, numRefImages),
-    [steps, numRefImages]
+    () => estimateTotalSeconds(steps, numRefImages, resolution, cfgEnabled),
+    [steps, numRefImages, resolution, cfgEnabled]
   )
 
   useEffect(() => {

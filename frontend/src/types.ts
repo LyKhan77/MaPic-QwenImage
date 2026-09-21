@@ -15,4 +15,13 @@ export interface ActiveGeneration {
   status?: 'queued' | 'running' | 'saving'
   num_inference_steps?: number
   num_ref_images?: number
+  resolution?: number
+  cfg_enabled?: boolean
+}
+
+export interface GenerationTimeParams {
+  steps: number
+  numRefImages: number
+  resolution: number
+  cfgEnabled: boolean
 }

@@ -1,4 +1,4 @@
-import type { ActiveGeneration } from '../types'
+import type { ActiveGeneration, GenerationTimeParams } from '../types'
 
 export interface PendingGenerationSummary {
   prompt: string
@@ -64,12 +64,14 @@ export function hasGenerationWorkForUser(
 export function getActiveGenerationParams(
   activeGenerations: ActiveGeneration[],
   userId: string,
-): { steps: number; numRefImages: number } | null {
+): GenerationTimeParams | null {
   const activeGeneration = getUserActiveGenerations(activeGenerations, userId)[0]
   if (!activeGeneration) return null
 
   return {
-    steps: activeGeneration.num_inference_steps ?? 50,
+    steps: activeGeneration.num_inference_steps ?? 40,
     numRefImages: activeGeneration.num_ref_images ?? 0,
+    resolution: activeGeneration.resolution ?? 2048,
+    cfgEnabled: activeGeneration.cfg_enabled ?? false,
   }
 }

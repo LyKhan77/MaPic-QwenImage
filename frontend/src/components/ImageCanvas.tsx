@@ -1,6 +1,6 @@
 import { Download, Copy } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import type { Generation } from '../types'
+import type { Generation, GenerationTimeParams } from '../types'
 import type { ModelStatus } from '../lib/api'
 import Loader from './Loader'
 import BearAnimation from './BearAnimation'
@@ -16,7 +16,7 @@ interface ImageCanvasProps {
   isLoading: boolean
   modelStatus: ModelStatus
   onGenerate: (prompt: string, images?: string[], options?: GenerationOptions) => void
-  pendingGenParams?: { steps: number; numRefImages: number }
+  pendingGenParams?: GenerationTimeParams
   genKey?: number
   isViewingActiveGeneration?: boolean
 }
@@ -132,8 +132,10 @@ export default function ImageCanvas({ currentGeneration, isLoading, modelStatus,
                 <GenerationTimeDisplay
                   key={genKey}
                   isLoading={isLoading}
-                  steps={pendingGenParams?.steps ?? 50}
+                  steps={pendingGenParams?.steps ?? 40}
                   numRefImages={pendingGenParams?.numRefImages ?? 0}
+                  resolution={pendingGenParams?.resolution ?? 2048}
+                  cfgEnabled={pendingGenParams?.cfgEnabled ?? false}
                 />
               )}
             </motion.div>
