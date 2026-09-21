@@ -30,6 +30,12 @@ start-mapic-glm.sh
 !vercel-docs.md
 !API.md
 
+# Superpowers plans & specs are tracked as session records
+!docs/superpowers/plans/
+!docs/superpowers/plans/*.md
+!docs/superpowers/specs/
+!docs/superpowers/specs/*.md
+
 # Test files
 test_*.py
 *_test.py
