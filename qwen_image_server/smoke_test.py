@@ -9,6 +9,7 @@ docs/superpowers/plans/2026-09-21-qwen-image-2.1-migration.md (Fase 0).
 """
 
 import argparse
+import json
 import time
 
 import torch
@@ -23,6 +24,21 @@ def vram_report(tag: str):
         print(f"[{tag}] GPU {i}: peak {peak:.2f} GB / total {total:.2f} GB")
 
 
+def device_map_report(pipe):
+    """Show how much of the model landed on each device (CPU spill included)."""
+    seen = {}
+    for name in pipe.config.keys():
+        module = getattr(pipe, name, None)
+        if module is None or not hasattr(module, "parameters"):
+            continue
+        for param in module.parameters():
+            dev = str(param.device)
+            seen[dev] = seen.get(dev, 0) + param.numel()
+    for dev in sorted(seen):
+        print(f"  {dev}: {seen[dev] / 1e9:.2f}B params ({seen[dev] * 2 / 1e9:.2f} GB bf16)")
+    return seen
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--resolution", type=int, default=1024)
@@ -31,6 +47,11 @@ def main():
     parser.add_argument("--refs", type=int, default=0)
     parser.add_argument("--cfg-scale", type=float, default=1.0)
     parser.add_argument("--cpu-offload", action="store_true")
+    parser.add_argument(
+        "--max-memory",
+        default=None,
+        help='JSON batas memori per device, mis. {"cpu":"24GiB","0":"13GiB","1":"13GiB"}',
+    )
     parser.add_argument("--output", default="smoke_out.png")
     args = parser.parse_args()
 
@@ -39,6 +60,13 @@ def main():
     if args.cpu_offload:
         pipe = QwenImage21Pipeline.from_pretrained(args.model, torch_dtype=torch.bfloat16)
         pipe.enable_model_cpu_offload()
+    elif args.max_memory:
+        pipe = QwenImage21Pipeline.from_pretrained(
+            args.model,
+            torch_dtype=torch.bfloat16,
+            device_map="balanced",
+            max_memory=json.loads(args.max_memory),
+        )
     else:
         pipe = QwenImage21Pipeline.from_pretrained(
             args.model,
@@ -46,6 +74,8 @@ def main():
             device_map="balanced",
         )
     print(f"Load: {time.time() - t0:.1f}s")
+    print("Sebaran parameter:")
+    device_map_report(pipe)
 
     if hasattr(pipe.vae, "enable_slicing"):
         pipe.vae.enable_slicing()
