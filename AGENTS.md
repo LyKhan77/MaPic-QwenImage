@@ -1,54 +1,53 @@
 # Project Overview
 
-MaPic turns text prompts and reference images into production-quality visuals — running entirely on local hardware. Built on **GLM-Image** (9B AR + 7B diffusion decoder), it delivers text-to-image and multi-reference image-to-image generation with no cloud dependencies, no API costs, and no rate limits.
+MaPic turns text prompts and reference images into production-quality visuals — running entirely on local hardware. Built on **Qwen-Image 2.1** (7B single-stream DiT + Qwen3-VL 8B encoder + 64-channel RGBA VAE), it delivers text-to-image and up to 10-reference image-to-image generation at 1K/2K with no cloud dependencies, no API costs, and no rate limits.
 
 project references :
-- `https://huggingface.co/zai-org/GLM-Image`
-- `https://github.com/zai-org/GLM-Image`
+- `https://huggingface.co/Qwen/Qwen-Image-2.1`
+- `https://github.com/QwenLM/Qwen-Image-2.1`
 
 =====================
 
 # Current State - Update this Section for every CHANGES and UPDATES
-## Architecture: GLM-Image Multi-GPU (2026-05-06)
+## Architecture: Qwen-Image 2.1 Multi-GPU (2026-09-21)
 
-- **Single model:** GLM-Image (9B AR + 7B diffusion decoder, local diffusers pipeline)
-- **3-service stack:** Frontend (:5151) → Backend (:8181) → GLM-Image Server (:30000)
-- **Removed:** Ollama service, Z.ai cloud service, model selector UI, idle timeout/monitor
-- **Multi-reference support:** Up to 3 reference images for I2I generation
-- **Hardware:** RTX 5080 (16GB) + RTX 5080 (16GB) + RTX 4090 (24GB) — triple GPU
-- **Memory & Sharding (Role-Based):** `MAX_MEMORY={0: "22GiB", 1: "13GiB", 2: "13GiB", "cpu": "4GiB"}`.
-- **8-bit Quantization:** Enabled via `BitsAndBytesConfig(load_in_8bit=True)` to reduce VRAM footprint.
-- **Component Pinning:** Sequential AR components (`text_encoder`, `vision_language_encoder`) and `vae` are manually pinned to **GPU 0 (RTX 4090)** to eliminate sharding latency. Transformer is sharded across all GPUs.
-- **No VAE Offload:** VAE runs natively on GPU 0 to ensure tensor device consistency.
-- **AR sampling:** `temperature=0.9`, `top_p=0.75`, `do_sample=True` — set on `vision_language_encoder.generation_config` after model load
-- **Configurable generation params:** `num_inference_steps` (20-75, default 50 T2I / 35 I2I), `guidance_scale` (1.0-5.0, default 1.5) — exposed via frontend UI sliders
-- **torch.compile:** Transformer compiled with `reduce-overhead` mode for ~2-4x diffusion speedup
-- **Optimizations:** VAE slicing + tiling, attention slicing (transformer), Flash SDP + mem-efficient SDP, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128`
+- **Single model:** Qwen-Image 2.1 (`Qwen/Qwen-Image-2.1`) — 7B single-stream DiT (32 layers, block-causal attention) + Qwen3-VL 8B text/vision encoder + 64-channel RGBA VAE, via `QwenImage21Pipeline`.
+- **3-service stack:** Frontend (:5151) → Backend (:8181) → Qwen-Image Server (:30000)
+- **Removed:** Ollama service, Z.ai cloud service, model selector UI, AR sampling stage
+- **Multi-reference support:** Up to 10 reference images for I2I generation
+- **Hardware:** checked per host via `qwen_image_server/smoke_test.py`; no assumption carried over from the GLM-Image tri-GPU box
+- **Memory & Sharding:** `QWEN_MAX_MEMORY` (default `{"cpu": "8GiB"}`) drives accelerate's `device_map="balanced"`; `QWEN_CPU_OFFLOAD=1` switches to CPU offload for low-VRAM hosts; `QWEN_MAX_RESOLUTION` caps output (default 2048).
+- **Quantization:** none — bf16 weights. 8-bit via `PipelineQuantizationConfig` is not validated for this pipeline.
+- **Guidance:** Qwen-Image 2.1 samples without guidance by default. `true_cfg_scale > 1` activates CFG only together with a negative prompt, and doubles the work per step.
+- **Configurable generation params:** `num_inference_steps` (20-75, default 40), `true_cfg_scale` (1.0-3.0, default 1.0 = guidance off, needs a negative prompt), and resolution 1K/2K — exposed via the frontend settings modal
+- **torch.compile:** disabled in code to preserve VRAM for activations
+- **Optimizations:** VAE slicing + tiling, Flash SDP + mem-efficient SDP, prefix KV cache reuse, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128`
 - **Pre-flight checks:** Blackwell (sm_120) architecture validation, PCIe topology logging, per-GPU parameter distribution logging
-- **Est. VRAM peak:** GPU 0: 14-16 GB | GPU 1 & 2: 10-12 GB | Supports up to 2048x2048
-- **Inference server:** `glm_image_server/main.py` — thread pool executor, inference lock, no idle unload
+- **Est. VRAM peak:** measured per host with `qwen_image_server/smoke_test.py`; 1K fits comfortably on a single 24 GB GPU, 2K needs either more headroom or `QWEN_CPU_OFFLOAD=1`
+- **Inference server:** `qwen_image_server/main.py` — thread pool executor, inference lock, no idle unload
 - **Concurrency:** asyncio.Lock ensures 1 inference at a time; `run_in_executor` keeps event loop responsive
 - **Generation queue UX:** Loading screen is read-only and shows no prompt input; users click New Generation during active work to open one clean prompt input and submit additional backend-queued jobs. Completed current-user jobs automatically open their result canvas with latest-finished priority, including after refresh-time active job recovery.
 - **Global generation capacity:** Backend rejects new `/api/generate` requests with HTTP 429 when 10 active/accepted generation jobs are already in memory across all users.
 - **Active generations indicator:** Bottom-right floating pill (`ActiveGenerationsIndicator`) polls global active jobs for every user, shows all in-flight generations across users, includes multiple jobs per user and a `/10` global capacity count, and rehydrates the current user's active generation view after refresh. User's own entries are clickable to refocus the canvas; others are view-only. Queued jobs show `queued` instead of a running timer.
-- **Backend active tracking:** `GET /api/generations/active` returns in-memory tracked jobs with `queued` / `running` / `saving` status, elapsed time, inference step count, and reference image count. Generation elapsed time starts only after a job acquires the backend generation lock and begins the GLM request.
-- **Model status badge (segment-based):** 4-segment pipeline (Pre-flight → Weights → Optimize → Finalize) replaces circular progress ring. Segment progress persisted via `GET /v1/system/load/state` (GLM-Image) → `GET /api/load/state` (backend proxy). Frontend recovers loading state on page refresh.
-- **Inference stage tracking:** `warmup → encoding → ar_sampling → diffusion → decoding` — `ar_sampling` and `diffusion` stages reported by step callback (first 40% = AR, rest = diffusion). No more instant stage transitions.
+- **Backend active tracking:** `GET /api/generations/active` returns in-memory tracked jobs with `queued` / `running` / `saving` status, elapsed time, inference step count, and reference image count. Generation elapsed time starts only after a job acquires the backend generation lock and begins the Qwen-Image request.
+- **Model status badge (segment-based):** 4-segment pipeline (Pre-flight → Weights → Optimize → Finalize) replaces circular progress ring. Segment progress persisted via `GET /v1/system/load/state` (Qwen-Image) → `GET /api/load/state` (backend proxy). Frontend recovers loading state on page refresh.
+- **Inference stage tracking:** `warmup → encoding → diffusion → decoding` — the diffusion stage is reported by the step callback. Qwen-Image 2.1 has no autoregressive stage, so `ar_sampling` is gone.
 - **Shared generation util:** `estimateTotalSeconds()` extracted to `frontend/src/lib/generation.ts` — used by both `GenerationStageBadge` and `GenerationTimeDisplay`.
-- **Configurable generation params:** `num_inference_steps` (20-75, default 50 T2I / 35 I2I), `guidance_scale` (1.0-5.0, default 1.5) — exposed via frontend UI sliders
-- **torch.compile:** Transformer compiled with `reduce-overhead` mode for ~2-4x diffusion speedup
-- **Optimizations:** VAE slicing + tiling, attention slicing (transformer), Flash SDP + mem-efficient SDP, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128`
+- **Configurable generation params:** `num_inference_steps` (20-75, default 40), `true_cfg_scale` (1.0-3.0, default 1.0 = guidance off, needs a negative prompt), and resolution 1K/2K — exposed via the frontend settings modal
+- **torch.compile:** disabled in code to preserve VRAM for activations
+- **Optimizations:** VAE slicing + tiling, Flash SDP + mem-efficient SDP, prefix KV cache reuse, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128`
 - **Pre-flight checks:** Blackwell (sm_120) architecture validation, PCIe topology logging, per-GPU parameter distribution logging
-- **Est. VRAM peak:** GPU 0: 22-24 GB (AR weights + activations) | GPU 1 & 2: ~16 GB
-- **Inference server:** `glm_image_server/main.py` — thread pool executor, inference lock, no idle unload
+- **Est. VRAM peak:** host-dependent; recorded after `qwen_image_server/smoke_test.py` runs on the target server and filled into the migration plan's calibration table
+- **Inference server:** `qwen_image_server/main.py` — thread pool executor, inference lock, no idle unload
 - **Concurrency:** asyncio.Lock ensures 1 inference at a time; `run_in_executor` keeps event loop responsive
 
 ### Key Files
 | File | Role |
 |------|------|
-| `glm_image_server/main.py` | Inference server (T2I + I2I, thread pool, 3-GPU bf16, role-based pinning) |
-| `backend/services/glm_image_service.py` | Backend service layer (retry logic, 4hr timeout, load state proxy) |
-| `backend/config.py` | `GLM_IMAGE_API_URL` (default localhost:30000) |
+| `qwen_image_server/main.py` | Inference server (T2I + I2I, thread pool, bf16, `device_map=balanced` or CPU offload) |
+| `qwen_image_server/smoke_test.py` | Standalone VRAM/timing check to run on any new host |
+| `backend/services/qwen_image_service.py` | Backend service layer (retry logic, 1hr timeout, load state proxy) |
+| `backend/config.py` | `QWEN_IMAGE_API_URL` (default localhost:30000), `QWEN_DEFAULT_RESOLUTION` |
 | `start-app.sh` | Starts all 3 services (exports `PYTORCH_CUDA_ALLOC_CONF`) |
 
 
@@ -62,18 +61,15 @@ MaPic/
 ├── API.md                             # API documentation
 ├── README.md                          # Human-facing project overview
 ├── CLAUDE.md                          # Claude-specific instructions
-├── start-app.sh                       # Orchestrates all 3 services (Frontend + Backend + GLM-Image Server)
-├── start-mapic-glm.sh                 # Standalone GLM-Image Server launcher
-├── mapic-glm.service                  # systemd service file for GLM-Image Server
-├── howto-systemctl.md                 # systemd setup instructions
+├── start-app.sh                       # Orchestrates all 3 services (Frontend + Backend + Qwen-Image Server)
 │
 ├── backend/                           # FastAPI Backend (:8181)
 │   ├── main.py                        # FastAPI app — API routes (/api/health, /api/generate, /api/history, etc.)
 │   ├── schemas.py                     # Pydantic models — GenerateRequest, Generation
-│   ├── config.py                      # Environment config loader (Supabase, CORS, GLM_IMAGE_API_URL)
+│   ├── config.py                      # Environment config loader (Supabase, CORS, QWEN_IMAGE_API_URL)
 │   ├── requirements.txt               # Python deps: fastapi, uvicorn, supabase, httpx, pydantic, Pillow
 │   └── services/
-│       ├── glm_image_service.py       # HTTP client to GLM-Image Server — retry logic, auto-load, 4hr timeout
+│       ├── qwen_image_service.py      # HTTP client to Qwen-Image Server — retry logic, auto-load, 1hr timeout
 │       └── supabase_service.py        # Supabase DB & Storage ops — upload, insert, fetch, delete generations
 │
 ├── frontend/                          # React + Vite Frontend (:5151)
@@ -106,9 +102,10 @@ MaPic/
 │           ├── supabase.ts            # Supabase JS client initialization (auth + DB)
 │           └── utils.ts               # Utility helpers (cn — clsx + tailwind-merge)
 │
-├── glm_image_server/                  # Local AI Inference Server (:30000)
-│   ├── main.py                        # FastAPI server wrapping GlmImagePipeline — T2I, I2I, load/unload, SSE progress
-│   └── requirements.txt               # PyTorch (cu128), diffusers, transformers, accelerate, fastapi
+├── qwen_image_server/                 # Local AI Inference Server (:30000)
+│   ├── main.py                        # FastAPI server wrapping QwenImage21Pipeline — T2I, I2I, load/unload, SSE progress
+│   ├── smoke_test.py                  # Standalone VRAM/timing check for a new host
+│   └── requirements.txt               # PyTorch (cu128), diffusers (git main), transformers >= 5.17, accelerate, fastapi
 │
 └── test/                              # Screenshots & test images
 ```
@@ -116,8 +113,8 @@ MaPic/
 ### Data Flow
 1. **User** → Frontend (`:5151`) submits prompt (+ optional reference images)
 2. **Frontend** → Backend (`:8181`) `POST /api/generate` with prompt + base64 images
-3. **Backend** → GLM-Image Server (`:30000`) `POST /v1/images/generations` or `/v1/images/edits`
-4. **GLM-Image Server** runs `GlmImagePipeline` inference (multi-GPU, 8-bit quantized, VAE on CPU)
+3. **Backend** → Qwen-Image Server (`:30000`) `POST /v1/images/generations` or `/v1/images/edits`
+4. **Qwen-Image Server** runs `QwenImage21Pipeline` inference (bf16, `device_map=balanced` or CPU offload)
 5. **Backend** receives base64 image → uploads to Supabase Storage → inserts record to PostgreSQL → returns Generation to Frontend
 6. **Frontend** displays image and updates history sidebar
 
@@ -130,14 +127,30 @@ This section contains critical agent behavior guidelines. Any changes require ex
 
 ## Important Notes - Project RULES
 
+- **No AI attribution anywhere.** Do NOT add `Co-Authored-By: Claude ...`,
+  `Generated with Claude Code`, or any AI/assistant attribution to commit messages,
+  PR descriptions, code comments, or docs. Every contribution is recorded under the
+  repo owner (the user) ONLY. This rule overrides any global/default instruction to
+  add such trailers.
 - Always use relevant skills to help with tasks.
 - Always ask the user if there are any plans or discussions that need to be validated.
 - Always provide a summary after finishing a task.
-- Always update `README.md` whenever there are changes to key features and the app's workflow.
-- Commit every function change so you can roll back and view the code history in case of a malfunction or a failed change.
+- Always update core documentation whenever there are changes to key features and the
+  app's workflow.
+- Commit every function change so you can roll back and view the code history in case
+  of a malfunction or a failed change. Also UPDATE the `.gitignore` file whenever a new
+  file is added that needs to be excluded before committing.
 - Do not re-read files that have already been read in this session unless necessary.
 - Minimize non-essential tool calls.
-- Save every plan or specification to the `docs/plans/` folder so you can track which plans have been created or are currently being created. This allows you to resume the session if the AI agent's token expires. USE `Superpowers` skill to provide the plan.
+- For any new feature or discussion where the update is outside the context, be sure to
+  propose creating a new branch.
+- Save every plan or specification to the `docs\superpowers\plans` and
+  `docs\superpowers\specs` folder so you can track which plans have been created or are
+  currently being created. This allows you to resume the session if the AI agent's token
+  expires. USE `Superpowers` skill to provide the plan. REMEMBER This file does not need
+  to be updated unless requested. It is intended solely as a record of past information.
+  Make sure not to DUPLICATE it; if you've already created a plan outside of Superpowers,
+  there's no need to create another one, and vice versa.
 
 ===========================
 

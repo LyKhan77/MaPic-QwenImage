@@ -8,17 +8,17 @@ MaPic consists of two FastAPI services:
 
 | Service | Port | Description |
 |---------|------|-------------|
-| **MaPic Backend** | `:8181` | Orchestration layer — handles auth, history, storage, and proxies inference requests to the GLM-Image Server. |
-| **GLM-Image Server** | `:30000` | Local inference engine — loads the GLM-Image model and runs T2I / I2I generation. |
+| **MaPic Backend** | `:8181` | Orchestration layer — handles auth, history, storage, and proxies inference requests to the Qwen-Image Server. |
+| **Qwen-Image Server** | `:30000` | Local inference engine — loads the Qwen-Image 2.1 model and runs T2I / I2I generation. |
 
-The React frontend (`:5151`) communicates exclusively with the **MaPic Backend**. The backend then forwards generation requests to the **GLM-Image Server** internally.
+The React frontend (`:5151`) communicates exclusively with the **MaPic Backend**. The backend then forwards generation requests to the **Qwen-Image Server** internally.
 
 ---
 
 ## MaPic Backend API (`http://localhost:8181/api`)
 
 ### `GET /api/health`
-Check the health status of the downstream GLM-Image Server.
+Check the health status of the downstream Qwen-Image Server.
 
 **Response:**
 ```json
@@ -31,7 +31,7 @@ Check the health status of the downstream GLM-Image Server.
 - `ready` — Model is loaded and ready for inference.
 - `loading` — Model is currently being loaded into GPU memory.
 - `unloaded` — Model is not loaded (VRAM freed).
-- `offline` — GLM-Image Server is unreachable.
+- `offline` — Qwen-Image Server is unreachable.
 
 ---
 
@@ -48,12 +48,12 @@ data: {"progress": 100, "message": "Ready."}
 ```
 
 **Description:**
-Used by the frontend to show a real-time progress bar while the GLM-Image model is being loaded. If the model is already loaded, it immediately returns `progress: 100`. If an error occurs, it returns `error: true`.
+Used by the frontend to show a real-time progress bar while the Qwen-Image 2.1 model is being loaded. If the model is already loaded, it immediately returns `progress: 100`. If an error occurs, it returns `error: true`.
 
 ---
 
 ### `GET /api/load/state`
-Fetch the persisted model loading state from the GLM-Image Server.
+Fetch the persisted model loading state from the Qwen-Image Server.
 
 **Response:**
 ```json
@@ -67,12 +67,12 @@ Fetch the persisted model loading state from the GLM-Image Server.
 ```
 
 **Description:**
-Used by the frontend to recover model loading progress after a page refresh. If the GLM-Image Server is unreachable, the backend returns an offline fallback state.
+Used by the frontend to recover model loading progress after a page refresh. If the Qwen-Image Server is unreachable, the backend returns an offline fallback state.
 
 ---
 
 ### `POST /api/load`
-Manually load the GLM-Image model into GPU memory.
+Manually load the Qwen-Image 2.1 model into GPU memory.
 
 **Response:**
 ```json
@@ -87,7 +87,7 @@ Blocks until the model is fully loaded. Useful for pre-warming the server before
 ---
 
 ### `POST /api/unload`
-Manually unload the GLM-Image model to free GPU VRAM.
+Manually unload the Qwen-Image 2.1 model to free GPU VRAM.
 
 **Response:**
 ```json
@@ -110,8 +110,10 @@ Generate an image from a text prompt (T2I) or from a prompt + reference images (
   "prompt": "A futuristic cityscape at sunset",
   "user_id": "550e8400-e29b-41d4-a716-446655440000",
   "images": ["base64encodedstring..."],
-  "num_inference_steps": 35,
-  "guidance_scale": 1.5
+  "negative_prompt": "blurry, low quality",
+  "true_cfg_scale": 1.0,
+  "num_inference_steps": 40,
+  "resolution": 2048
 }
 ```
 
@@ -130,21 +132,23 @@ Generate an image from a text prompt (T2I) or from a prompt + reference images (
 **Description:**
 - If `images` is omitted or empty, performs **text-to-image (T2I)** generation.
 - If `images` is provided (base64-encoded PNG/JPEG strings), performs **image-to-image (I2I)** generation using the reference images.
-- `num_inference_steps` is configurable from `20` to `75`.
-- `guidance_scale` is configurable from `1.0` to `5.0`.
+- `num_inference_steps` is configurable from `20` to `75` (default `40`).
+- `resolution` accepts `1024` or `2048` (native 2K).
+- `true_cfg_scale` accepts `1.0` to `3.0`. Qwen-Image 2.1 is sampled without guidance by default, so CFG only activates when `true_cfg_scale` is above `1.0` **and** `negative_prompt` is set — that roughly doubles the time per denoising step.
+- At most 10 reference images are accepted per request.
 - The backend accepts up to 10 queued/running/saving generation jobs globally.
 - The generated image is uploaded to Supabase Storage and a database record is created.
 - Returns the full `Generation` record including the public CDN URL.
 
 **Errors:**
 - `429` — Global generation queue is full.
-- `502` — GLM-Image Server error or Supabase error.
+- `502` — Qwen-Image Server error or Supabase error.
 - `500` — Internal server error.
 
 ---
 
 ### `GET /api/generations/status`
-Fetch the current GLM-Image inference stage.
+Fetch the current Qwen-Image inference stage.
 
 **Response:**
 ```json
@@ -156,7 +160,7 @@ Fetch the current GLM-Image inference stage.
 ```
 
 **Description:**
-Used by the frontend generation stage badge. Known stages include `idle`, `warmup`, `encoding`, `ar_sampling`, `diffusion`, and `decoding`.
+Used by the frontend generation stage badge. Known stages include `idle`, `warmup`, `encoding`, `diffusion`, and `decoding`.
 
 ---
 
@@ -236,7 +240,7 @@ Delete a generation record and its associated image from storage.
 
 ---
 
-## GLM-Image Server API (`http://localhost:30000`)
+## Qwen-Image Server API (`http://localhost:30000`)
 
 > **Note:** These endpoints are consumed internally by the MaPic Backend. Frontend clients should not call them directly.
 
@@ -287,7 +291,7 @@ Used by the backend's `/api/load/state` proxy endpoint so the frontend can recov
 ---
 
 ### `POST /v1/system/load`
-Load the GLM-Image pipeline into GPU memory.
+Load the Qwen-Image 2.1 pipeline into GPU memory.
 
 **Response:**
 ```json
@@ -297,12 +301,11 @@ Load the GLM-Image pipeline into GPU memory.
 ```
 
 **Description:**
-- Loads the `zai-org/GLM-Image` model with 8-bit quantization (bitsandbytes) if available.
-- Uses role-based multi-GPU placement.
-- Pins sequential AR components and VAE to GPU 0.
-- Shards the transformer across all available GPUs.
-- Keeps VAE on GPU 0 to avoid tensor device mismatch.
-- Enables VAE slicing, VAE tiling, attention slicing, Flash SDP / memory-efficient SDP, and `torch.compile` for the transformer.
+- Loads `Qwen/Qwen-Image-2.1` in bf16 (7B single-stream DiT + Qwen3-VL 8B encoder + 64-channel RGBA VAE).
+- Shards the pipeline across GPUs with `device_map="balanced"`, bounded by `QWEN_MAX_MEMORY`.
+- With `QWEN_CPU_OFFLOAD=1` the pipeline loads without sharding and streams modules on demand instead (slower, far less VRAM).
+- Enables VAE slicing, VAE tiling, Flash SDP, and memory-efficient SDP.
+- Requests above `QWEN_MAX_RESOLUTION` are rejected so a low-VRAM host cannot OOM.
 
 ---
 
@@ -325,10 +328,12 @@ Text-to-image generation.
 ```json
 {
   "prompt": "A serene mountain lake at dawn",
-  "size": "1024x1024",
+  "negative_prompt": "blurry, low quality",
+  "true_cfg_scale": 1.0,
+  "resolution": 2048,
+  "size": "2048x2048",
   "response_format": "b64_json",
-  "num_inference_steps": 50,
-  "guidance_scale": 1.5
+  "num_inference_steps": 40
 }
 ```
 
@@ -344,9 +349,9 @@ Text-to-image generation.
 ```
 
 **Description:**
-- `size` is snapped to the nearest multiple of 32 (e.g., `1024x1024` stays `1024x1024`).
-- Runs with configurable `num_inference_steps` and `guidance_scale` values provided by the backend request.
-- Returns a base64-encoded PNG image.
+- `resolution` sets the output size (`1024` or `2048`). An explicit `size` (`WxH`) overrides it and is snapped down to a multiple of 32.
+- `true_cfg_scale` above `1.0` only takes effect together with `negative_prompt`.
+- Returns a base64-encoded PNG image (RGBA when the model produces transparency).
 - Inference is protected by an `asyncio.Lock`, so only one request runs at a time.
 
 ---
@@ -359,10 +364,11 @@ Image-to-image generation (multi-reference).
 {
   "prompt": "Make it cyberpunk style",
   "images": ["base64encoded...", "base64encoded..."],
-  "size": "1024x1024",
+  "negative_prompt": "blurry, low quality",
+  "true_cfg_scale": 1.0,
+  "resolution": 2048,
   "response_format": "b64_json",
-  "num_inference_steps": 35,
-  "guidance_scale": 1.5
+  "num_inference_steps": 40
 }
 ```
 
@@ -378,10 +384,11 @@ Image-to-image generation (multi-reference).
 ```
 
 **Description:**
-- Accepts up to 3 reference images as base64-encoded strings.
-- Reference images are resized to the target `size` using Lanczos resampling.
-- Runs with configurable `num_inference_steps` and `guidance_scale` values provided by the backend request.
-- Useful for style transfer, identity preservation, and visual editing.
+- Accepts up to 10 reference images as base64-encoded strings.
+- Reference images are passed through untouched: the pipeline resizes each one into its own aspect-ratio bucket before encoding.
+- `resolution` (or an explicit `size`) sets the output size; when neither is given, the aspect ratio follows the last reference image.
+- `true_cfg_scale` above `1.0` only takes effect together with `negative_prompt`.
+- Useful for style transfer, identity preservation, visual editing, and multi-subject composition.
 
 ---
 
@@ -392,9 +399,11 @@ Image-to-image generation (multi-reference).
 |-------|------|----------|-------------|
 | `prompt` | `string` | Yes | Text prompt (max 2000 chars). |
 | `user_id` | `UUID` | Yes | The user's UUID for auth and history tracking. |
-| `images` | `list[string]` | No | Base64-encoded reference images for I2I (max 3). |
-| `num_inference_steps` | `integer` | No | Diffusion step count, `20..75`, default `50`. |
-| `guidance_scale` | `number` | No | Guidance scale, `1.0..5.0`, default `1.5`. |
+| `images` | `list[string]` | No | Base64-encoded reference images for I2I (max 10). |
+| `negative_prompt` | `string` | No | Text to steer away from; required for CFG to activate. |
+| `true_cfg_scale` | `number` | No | CFG scale, `1.0..3.0`, default `1.0` (guidance off). |
+| `num_inference_steps` | `integer` | No | Diffusion step count, `20..75`, default `40`. |
+| `resolution` | `integer` | No | `1024` or `2048`, default `2048`. |
 
 ### `Generation`
 | Field | Type | Description |
@@ -416,25 +425,31 @@ Image-to-image generation (multi-reference).
 | `status` | `string` | `queued`, `running`, or `saving`. |
 | `num_inference_steps` | `integer` | Requested step count. |
 | `num_ref_images` | `integer` | Number of reference images attached to the job. |
+| `resolution` | `integer` | Requested output resolution (`1024` or `2048`). |
+| `cfg_enabled` | `boolean` | `true` when classifier-free guidance is active for the job. |
 
 ### `T2IRequest`
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `prompt` | `string` | — | Text prompt for generation. |
-| `size` | `string` | `"1024x1024"` | Output image dimensions (`WxH`). |
+| `negative_prompt` | `string` | `null` | Negative prompt; required for CFG. |
+| `true_cfg_scale` | `number` | `1.0` | CFG scale; `1.0` disables guidance. |
+| `resolution` | `integer` | `2048` | Output size when `size` is not given. |
+| `size` | `string` | `null` | Explicit `WxH`; snapped down to a multiple of 32. |
 | `response_format` | `string` | `"b64_json"` | Response format (only `b64_json` supported). |
-| `num_inference_steps` | `integer` | `50` | Diffusion step count. |
-| `guidance_scale` | `number` | `1.5` | Guidance scale. |
+| `num_inference_steps` | `integer` | `40` | Diffusion step count. |
 
 ### `I2IRequest`
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `prompt` | `string` | — | Text prompt for editing. |
-| `images` | `list[string]` | — | Reference images (base64-encoded). |
-| `size` | `string` | `"1024x1024"` | Output image dimensions. |
+| `images` | `list[string]` | — | Reference images (base64-encoded, max 10). |
+| `negative_prompt` | `string` | `null` | Negative prompt; required for CFG. |
+| `true_cfg_scale` | `number` | `1.0` | CFG scale; `1.0` disables guidance. |
+| `resolution` | `integer` | `2048` | Output size when `size` is not given. |
+| `size` | `string` | `null` | Explicit `WxH`; when omitted the aspect ratio follows the last reference image. |
 | `response_format` | `string` | `"b64_json"` | Response format. |
-| `num_inference_steps` | `integer` | `35` | Diffusion step count. |
-| `guidance_scale` | `number` | `1.5` | Guidance scale. |
+| `num_inference_steps` | `integer` | `40` | Diffusion step count. |
 
 ---
 
@@ -446,13 +461,15 @@ Image-to-image generation (multi-reference).
 |--------|---------|
 | `429` | Global generation queue is full. |
 | `500` | Unexpected internal server error. |
-| `502` | Downstream service error (GLM-Image Server or Supabase). Check the `detail` field for specifics. |
+| `502` | Downstream service error (Qwen-Image Server or Supabase). Check the `detail` field for specifics. |
 
-### GLM-Image Server
+### Qwen-Image Server
 
 | Condition | Response |
 |-----------|----------|
 | Model not loaded | `{"error": "Model failed to load"}` |
+| Resolution above `QWEN_MAX_RESOLUTION` | `{"error": "Resolution ... exceeds this server's limit of ..."}` |
+| More than 10 reference images | `{"error": "Qwen-Image 2.1 supports at most 10 reference images"}` |
 | Loading in progress | `{"status": "loading"}` on `/health` |
 
 ---
@@ -483,19 +500,29 @@ See [`database-schema.md`](./database-schema.md) for the Supabase Auth, Postgres
 |----------|----------|---------|-------------|
 | `SUPABASE_URL` | Yes | — | Supabase project URL. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | — | Supabase service role key (admin). |
-| `GLM_IMAGE_API_URL` | No | `http://localhost:30000` | URL of the GLM-Image Server. |
+| `QWEN_IMAGE_API_URL` | No | `http://localhost:30000` | URL of the Qwen-Image Server. |
+| `QWEN_DEFAULT_RESOLUTION` | No | `2048` | Default output resolution (`1024` or `2048`). |
 | `CORS_ORIGINS` | No | `http://localhost:5151,...` | Comma-separated allowed origins. |
 
-### GLM-Image Server
+### Qwen-Image Server
 
-No environment file is required. The server runs on port `30000` and downloads the model from HuggingFace on first run.
+The server reads its configuration from the environment instead of an env file:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `QWEN_MAX_MEMORY` | `{"cpu": "8GiB"}` | Per-device memory ceiling for `device_map="balanced"`. |
+| `QWEN_CPU_OFFLOAD` | `0` | `1` streams modules on demand instead of sharding (slower, less VRAM). |
+| `QWEN_MAX_RESOLUTION` | `2048` | Requests above this are rejected with an error. |
+| `HF_HOME` | library default | Where the ~47 GB of weights are cached. |
+
+The server runs on port `30000` and downloads the model from HuggingFace on first run.
 
 ---
 
 ## Concurrency & Timeouts
 
-- **Backend generation lock:** The MaPic Backend uses an `asyncio.Lock` around GLM generation calls so only **one accepted generation** is sent into inference at a time. Active jobs remain `queued` until they acquire this lock.
-- **Inference lock:** The GLM-Image Server also uses an `asyncio.Lock` as a downstream guard to ensure only **one generation request** runs at a time.
-- **Backend → GLM-Image timeout:** `14400` seconds (4 hours) to accommodate slow CPU-offloaded inference.
+- **Backend generation lock:** The MaPic Backend uses an `asyncio.Lock` around Qwen generation calls so only **one accepted generation** is sent into inference at a time. Active jobs remain `queued` until they acquire this lock.
+- **Inference lock:** The Qwen-Image Server also uses an `asyncio.Lock` as a downstream guard to ensure only **one generation request** runs at a time.
+- **Backend → Qwen-Image timeout:** `3600` seconds (1 hour). Enabling CFG roughly doubles each denoising step, so a 2K job with guidance takes the longest.
 - **Backend retries:** Up to `6` retries with `10`-second delays on connection errors (useful when the server is still loading).
-- **Model idle timeout:** The GLM-Image Server auto-unloads the model after `3600` seconds (1 hour) of inactivity to free VRAM.
+- **Model idle timeout:** The Qwen-Image Server auto-unloads the model after `3600` seconds (1 hour) of inactivity to free VRAM.
