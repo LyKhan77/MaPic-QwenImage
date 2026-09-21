@@ -40,10 +40,12 @@ start-mapic-glm.sh
 test_*.py
 *_test.py
 tests/
+# Smoke test server inference ikut di-track (bukan unit test)
+!qwen_image_server/smoke_test.py
 
-# GLM-Image server venv + HF cache
-glm_image_server/.venv/
-glm_image_server/venv/
-glm_image_server/__pycache__/
+# Qwen-Image inference server venv + HF cache
+qwen_image_server/.venv/
+qwen_image_server/venv/
+qwen_image_server/__pycache__/
 models/
 .vercel

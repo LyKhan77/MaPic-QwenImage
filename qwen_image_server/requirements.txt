@@ -1,9 +1,14 @@
 --extra-index-url https://download.pytorch.org/whl/cu128
-torch>=2.1
-git+https://github.com/huggingface/transformers.git
+# Blackwell (sm_120) needs PyTorch >= 2.6 with CUDA 12.8
+torch>=2.6
+# Qwen-Image 2.1 needs transformers >= 5.17 (Qwen3-VL). Fall back to
+# git+https://github.com/huggingface/transformers.git if PyPI lags.
+transformers>=5.17,<6
+accelerate>=1.0
+# QwenImage21Pipeline is not in a stable diffusers release yet
 git+https://github.com/huggingface/diffusers.git
-accelerate>=0.27
 fastapi>=0.110
 uvicorn>=0.29
 pillow>=10.0
 sentencepiece>=0.2.0
+huggingface_hub>=0.26
