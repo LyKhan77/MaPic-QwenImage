@@ -13,9 +13,9 @@ from fastapi.responses import StreamingResponse
 import uvicorn.logging
 
 try:
-    from backend.config import CORS_ORIGINS, GLM_IMAGE_API_URL
+    from backend.config import CORS_ORIGINS, QWEN_IMAGE_API_URL
     from backend.schemas import ActiveGeneration, GenerateRequest, Generation
-    from backend.services.glm_image_service import GlmImageError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model, stream_load_model
+    from backend.services.qwen_image_service import QwenImageError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model, stream_load_model
     from backend.services.supabase_service import (
         SupabaseError,
         fetch_history,
@@ -24,9 +24,9 @@ try:
         delete_generation,
     )
 except ModuleNotFoundError:
-    from config import CORS_ORIGINS, GLM_IMAGE_API_URL
+    from config import CORS_ORIGINS, QWEN_IMAGE_API_URL
     from schemas import ActiveGeneration, GenerateRequest, Generation
-    from services.glm_image_service import GlmImageError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model, stream_load_model
+    from services.qwen_image_service import QwenImageError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model, stream_load_model
     from services.supabase_service import (
         SupabaseError,
         fetch_history,
@@ -150,8 +150,10 @@ async def api_active_generations():
             prompt=info["prompt"],
             elapsed_seconds=int(now - info["started_at"]) if info.get("started_at") else 0,
             status=info.get("status", "running"),
-            num_inference_steps=info.get("num_inference_steps", 50),
+            num_inference_steps=info.get("num_inference_steps", 40),
             num_ref_images=info.get("num_ref_images", 0),
+            resolution=info.get("resolution", 2048),
+            cfg_enabled=info.get("cfg_enabled", False),
         ))
     return result
 
@@ -173,6 +175,8 @@ async def generate(payload: GenerateRequest):
         "status": "queued",
         "num_inference_steps": payload.num_inference_steps,
         "num_ref_images": len(payload.images or []),
+        "resolution": payload.resolution,
+        "cfg_enabled": payload.true_cfg_scale > 1 and bool(payload.negative_prompt),
     }
     try:
         async with _generation_lock:
@@ -181,7 +185,14 @@ async def generate(payload: GenerateRequest):
                 active_info["started_at"] = time.time()
                 active_info["status"] = "running"
 
-            image_bytes = await generate_image_bytes(payload.prompt, payload.images, payload.num_inference_steps, payload.guidance_scale)
+            image_bytes = await generate_image_bytes(
+                payload.prompt,
+                payload.images,
+                payload.num_inference_steps,
+                payload.true_cfg_scale,
+                payload.negative_prompt,
+                payload.resolution,
+            )
 
         active_info = _active_generations.get(gen_id)
         if active_info is not None:
@@ -190,8 +201,8 @@ async def generate(payload: GenerateRequest):
         image_path, public_url = upload_image(payload.user_id, image_bytes)
         record = insert_generation(payload.user_id, payload.prompt, image_path, public_url)
         return record
-    except GlmImageError as exc:
-        logger.exception("GLM-Image error during generate")
+    except QwenImageError as exc:
+        logger.exception("Qwen-Image error during generate")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except SupabaseError as exc:
         logger.exception("Supabase error during generate")

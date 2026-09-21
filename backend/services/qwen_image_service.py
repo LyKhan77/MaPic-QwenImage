@@ -5,23 +5,23 @@ import logging
 import httpx
 
 try:
-    from backend.config import GLM_IMAGE_API_URL
+    from backend.config import QWEN_IMAGE_API_URL
 except ModuleNotFoundError:
-    from config import GLM_IMAGE_API_URL
+    from config import QWEN_IMAGE_API_URL
 
-logger = logging.getLogger("mapic.glm_image")
+logger = logging.getLogger("mapic.qwen_image")
 
-TIMEOUT_SECONDS = 14400  # GLM-Image is slow with CPU offload (~10-15 min)
+TIMEOUT_SECONDS = 3600  # Qwen-Image 2.1 at 2K; enabling CFG roughly doubles each step
 MAX_RETRIES = 6
 RETRY_DELAY = 10  # seconds between retries
 
 
-class GlmImageError(Exception):
+class QwenImageError(Exception):
     pass
 
 
 async def get_health_status() -> str:
-    url = GLM_IMAGE_API_URL.rstrip("/")
+    url = QWEN_IMAGE_API_URL.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(f"{url}/health")
@@ -32,14 +32,14 @@ async def get_health_status() -> str:
         return "offline"
 
 async def load_model() -> dict:
-    url = GLM_IMAGE_API_URL.rstrip("/")
+    url = QWEN_IMAGE_API_URL.rstrip("/")
     async with httpx.AsyncClient(timeout=300) as client: # Timeout panjang untuk loading
         resp = await client.post(f"{url}/v1/system/load")
         resp.raise_for_status()
         return resp.json()
 
 async def stream_load_model():
-    url = GLM_IMAGE_API_URL.rstrip("/")
+    url = QWEN_IMAGE_API_URL.rstrip("/")
     # Disable timeout for the stream as loading can take > 5 minutes
     async with httpx.AsyncClient(timeout=None) as client:
         async with client.stream("GET", f"{url}/v1/system/load/stream") as response:
@@ -49,7 +49,7 @@ async def stream_load_model():
 
 
 async def unload_model() -> dict:
-    url = GLM_IMAGE_API_URL.rstrip("/")
+    url = QWEN_IMAGE_API_URL.rstrip("/")
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(f"{url}/v1/system/unload")
         resp.raise_for_status()
@@ -57,7 +57,7 @@ async def unload_model() -> dict:
 
 
 async def get_generation_status() -> dict:
-    url = GLM_IMAGE_API_URL.rstrip("/")
+    url = QWEN_IMAGE_API_URL.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(f"{url}/v1/generations/status")
@@ -69,7 +69,7 @@ async def get_generation_status() -> dict:
 
 
 async def get_load_state() -> dict:
-    url = GLM_IMAGE_API_URL.rstrip("/")
+    url = QWEN_IMAGE_API_URL.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(f"{url}/v1/system/load/state")
@@ -80,14 +80,25 @@ async def get_load_state() -> dict:
         return {"status": "offline", "segment_index": 0, "segment_progress": 0.0, "progress": 0, "message": ""}
 
 
-async def generate_image_bytes(prompt: str, images: list[str] | None = None, num_inference_steps: int = 50, guidance_scale: float = 1.5) -> bytes:
-    url = GLM_IMAGE_API_URL.rstrip("/")
+async def generate_image_bytes(
+    prompt: str,
+    images: list[str] | None = None,
+    num_inference_steps: int = 40,
+    true_cfg_scale: float = 1.0,
+    negative_prompt: str | None = None,
+    resolution: int = 2048,
+) -> bytes:
+    url = QWEN_IMAGE_API_URL.rstrip("/")
 
     payload = {
         "prompt": prompt,
         "num_inference_steps": num_inference_steps,
-        "guidance_scale": guidance_scale,
+        "true_cfg_scale": true_cfg_scale,
+        "resolution": resolution,
     }
+
+    if negative_prompt:
+        payload["negative_prompt"] = negative_prompt
 
     if images:
         endpoint = f"{url}/v1/images/edits"
@@ -113,13 +124,13 @@ async def generate_image_bytes(prompt: str, images: list[str] | None = None, num
                 return base64.b64decode(b64)
         except httpx.ConnectError as exc:
             last_exc = exc
-            logger.warning("GLM-Image server not ready, retry %d/%d in %ds", attempt + 1, MAX_RETRIES, RETRY_DELAY)
+            logger.warning("Qwen-Image server not ready, retry %d/%d in %ds", attempt + 1, MAX_RETRIES, RETRY_DELAY)
             await asyncio.sleep(RETRY_DELAY)
         except httpx.HTTPStatusError as exc:
-            logger.exception("GLM-Image server returned %s", exc.response.status_code)
-            raise GlmImageError(f"GLM-Image error: {exc.response.text}") from exc
+            logger.exception("Qwen-Image server returned %s", exc.response.status_code)
+            raise QwenImageError(f"Qwen-Image error: {exc.response.text}") from exc
         except Exception as exc:
-            logger.exception("GLM-Image request failed")
-            raise GlmImageError(str(exc)) from exc
+            logger.exception("Qwen-Image request failed")
+            raise QwenImageError(str(exc)) from exc
 
-    raise GlmImageError(f"GLM-Image server unavailable after {MAX_RETRIES} retries: {last_exc}") from last_exc
+    raise QwenImageError(f"Qwen-Image server unavailable after {MAX_RETRIES} retries: {last_exc}") from last_exc
