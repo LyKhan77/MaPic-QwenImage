@@ -18,9 +18,9 @@ echo "Starting MaPic..."
 # PyTorch memory optimization: reduce fragmentation that leads to OOM
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
 
-# Start GLM-Image Server
-echo "Starting GLM-Image Server on port 30000..."
-cd glm_image_server
+# Start Qwen-Image 2.1 Server
+echo "Starting Qwen-Image 2.1 Server on port 30000..."
+cd qwen_image_server
 if [ -d "venv" ]; then
     source venv/bin/activate
 elif [ -d ".venv" ]; then
@@ -50,7 +50,7 @@ cd ..
 echo "MaPic is running!"
 echo "- Frontend:     http://localhost:5151"
 echo "- Backend:      http://localhost:8181"
-echo "- GLM-Image:    http://localhost:30000"
+echo "- Qwen-Image:   http://localhost:30000"
 echo "Press Ctrl+C to stop all services."
 
 # Wait for all background processes
