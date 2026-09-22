@@ -1,4 +1,5 @@
 import { useState, type KeyboardEvent, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Send, Paperclip, X, ChevronDown, Settings2, Info } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ModelStatus } from '../lib/api'
@@ -255,8 +256,11 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
           </div>
         )}
 
-        {/* Settings Modal */}
-        <AnimatePresence>
+        {/* Settings Modal — diportal ke body: root PromptInput memakai
+            backdrop-blur saat ada hasil, dan backdrop-filter menjadikannya
+            containing block untuk position:fixed sehingga modal terpotong. */}
+        {createPortal(
+          <AnimatePresence>
           {showSettings && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -272,7 +276,7 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ duration: 0.2 }}
-                className="relative z-10 w-full max-w-sm mx-4 rounded-xl border border-border bg-card/95 backdrop-blur-md p-5 shadow-2xl"
+                className="relative z-10 w-full max-w-sm mx-4 max-h-[85vh] overflow-y-auto rounded-xl border border-border bg-card/95 backdrop-blur-md p-5 shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between mb-5">
@@ -347,7 +351,9 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
               </motion.div>
             </motion.div>
           )}
-        </AnimatePresence>
+        </AnimatePresence>,
+          document.body,
+        )}
       </div>
     </div>
   )
