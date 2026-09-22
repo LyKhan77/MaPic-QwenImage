@@ -1,0 +1,20 @@
+# Repo root build context: kecualikan yang tidak boleh masuk image.
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+**/node_modules
+**/dist
+**/.venv
+**/venv
+
+# Rahasia tidak boleh ikut terbakar ke dalam image.
+**/.env
+**/.env.local
+
+# Tidak dibutuhkan image, dan membuat build context membengkak.
+temp/
+test/
+docs/
+*.md
+logs/

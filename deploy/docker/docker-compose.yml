@@ -1,0 +1,102 @@
+# MaPic — Qwen-Image 2.1
+#
+# Empat layanan, satu network internal. Model tidak dibakar ke image:
+# folder model di host di-mount read-only ke ComfyUI lewat extra_model_paths.yaml.
+#
+# Jalankan dari direktori ini:
+#   docker compose up -d --build
+#   docker compose logs -f comfyui
+
+name: mapic
+
+services:
+  # ---------------------------------------------------------------- engine ---
+  comfyui:
+    build:
+      context: ./comfyui
+    image: mapic/comfyui:qwen21
+    restart: unless-stopped
+    volumes:
+      # Sumber model (qwen-image-2.1-Q8_0.gguf, text_encoders/, vae/)
+      - ${MODELS_DIR:-/home/gspe-ai2/apps/qwen21-gguf}:/models:ro
+      # Direktori kerja ComfyUI: input (gambar referensi), output, temp
+      - comfyui-input:/opt/ComfyUI/input
+      - comfyui-output:/opt/ComfyUI/output
+      - comfyui-temp:/opt/ComfyUI/temp
+    ports:
+      # Hanya localhost — untuk debugging UI graph lewat SSH tunnel.
+      # Layanan lain menjangkaunya lewat network internal: http://comfyui:8188
+      - "127.0.0.1:8188:8188"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            # GPU 1 saja: GPU 0 pernah lepas dari bus (Xid 79/154).
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8188/system_stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+
+  # --------------------------------------------------------------- facade ---
+  qwen-image:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/qwen-image/Dockerfile
+    image: mapic/qwen-image:2.1
+    restart: unless-stopped
+    environment:
+      COMFY_BASE_URL: http://comfyui:8188
+      QWEN_MAX_RESOLUTION: "1024"
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
+      # Nama file model di dalam folder yang di-mount ke ComfyUI.
+      # Ganti di sini bila memakai kuantisasi lain (mis. Q6_K), tanpa menyentuh kode.
+      QWEN_GGUF_NAME: qwen-image-2.1-Q8_0.gguf
+      QWEN_CLIP_NAME: qwen3vl_8b_int8_convrot.safetensors
+      QWEN_VAE_NAME: qwen_image_2.1_vae_bf16.safetensors
+    depends_on:
+      comfyui:
+        condition: service_healthy
+
+  # -------------------------------------------------------------- backend ---
+  backend:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/backend/Dockerfile
+    image: mapic/backend:2.1
+    restart: unless-stopped
+    # Rahasia dibaca saat runtime; file yang sama dipakai versi systemd.
+    env_file:
+      - ../../backend/.env
+    environment:
+      QWEN_IMAGE_API_URL: http://qwen-image:30000
+      QWEN_DEFAULT_RESOLUTION: "1024"
+    ports:
+      - "8281:8000"
+    depends_on:
+      - qwen-image
+
+  # ------------------------------------------------------------- frontend ---
+  frontend:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/frontend/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://192.168.2.142:8281/api}
+        VITE_SUPABASE_URL: ${SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+    image: mapic/frontend:2.1
+    restart: unless-stopped
+    ports:
+      - "5151:80"
+    depends_on:
+      - backend
+
+volumes:
+  comfyui-input:
+  comfyui-output:
+  comfyui-temp:

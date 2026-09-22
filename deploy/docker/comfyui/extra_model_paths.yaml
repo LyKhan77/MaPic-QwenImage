@@ -1,0 +1,5 @@
+mapic:
+  base_path: /models
+  diffusion_models: diffusion_models
+  text_encoders: text_encoders
+  vae: vae
