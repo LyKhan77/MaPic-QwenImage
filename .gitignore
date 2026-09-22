@@ -49,3 +49,6 @@ qwen_image_server/venv/
 qwen_image_server/__pycache__/
 models/
 .vercel
+# Unit systemd host-specific (dibuat di server, bukan di repo)
+deploy/*.service
+qwen-image.service
