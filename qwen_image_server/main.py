@@ -60,9 +60,15 @@ def make_diffusion_callback(total_steps: int):
     return callback
 
 
+def _parse_max_memory(raw: str) -> dict:
+    # accelerate expects integer GPU indices, but JSON object keys always come back as strings.
+    parsed = json.loads(raw)
+    return {int(k) if str(k).isdigit() else k: v for k, v in parsed.items()}
+
+
 # Qwen-Image 2.1: 7B single-stream DiT + Qwen3-VL 8B text encoder + 64-channel VAE.
 # QWEN_MAX_MEMORY drives accelerate's balanced sharding across the available GPUs.
-MAX_MEMORY = json.loads(os.getenv("QWEN_MAX_MEMORY", '{"cpu": "8GiB"}'))
+MAX_MEMORY = _parse_max_memory(os.getenv("QWEN_MAX_MEMORY", '{"cpu": "8GiB"}'))
 # CPU offload skips per-GPU sharding and streams modules on demand: less VRAM, much slower.
 USE_CPU_OFFLOAD = os.getenv("QWEN_CPU_OFFLOAD", "0") == "1"
 # Low-VRAM hosts cap the output resolution so oversized requests fail fast instead of OOM.

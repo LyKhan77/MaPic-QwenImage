@@ -24,6 +24,12 @@ def vram_report(tag: str):
         print(f"[{tag}] GPU {i}: peak {peak:.2f} GB / total {total:.2f} GB")
 
 
+def parse_max_memory(raw: str) -> dict:
+    # accelerate expects integer GPU indices, but JSON object keys always come back as strings.
+    parsed = json.loads(raw)
+    return {int(k) if str(k).isdigit() else k: v for k, v in parsed.items()}
+
+
 def device_map_report(pipe):
     """Show how much of the model landed on each device (CPU spill included)."""
     seen = {}
@@ -65,7 +71,7 @@ def main():
             args.model,
             torch_dtype=torch.bfloat16,
             device_map="balanced",
-            max_memory=json.loads(args.max_memory),
+            max_memory=parse_max_memory(args.max_memory),
         )
     else:
         pipe = QwenImage21Pipeline.from_pretrained(
