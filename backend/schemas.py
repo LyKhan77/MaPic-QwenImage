@@ -37,5 +37,5 @@ class ActiveGeneration(BaseModel):
     status: str = "running"
     num_inference_steps: int = 40
     num_ref_images: int = 0
-    resolution: int = 2048
+    resolution: int = 1024
     cfg_enabled: bool = False

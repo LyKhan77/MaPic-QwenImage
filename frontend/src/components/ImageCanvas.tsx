@@ -134,7 +134,7 @@ export default function ImageCanvas({ currentGeneration, isLoading, modelStatus,
                   isLoading={isLoading}
                   steps={pendingGenParams?.steps ?? 40}
                   numRefImages={pendingGenParams?.numRefImages ?? 0}
-                  resolution={pendingGenParams?.resolution ?? 2048}
+                  resolution={pendingGenParams?.resolution ?? 1024}
                   cfgEnabled={pendingGenParams?.cfgEnabled ?? false}
                 />
               )}

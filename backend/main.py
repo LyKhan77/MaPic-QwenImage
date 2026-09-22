@@ -152,7 +152,7 @@ async def api_active_generations():
             status=info.get("status", "running"),
             num_inference_steps=info.get("num_inference_steps", 40),
             num_ref_images=info.get("num_ref_images", 0),
-            resolution=info.get("resolution", 2048),
+            resolution=info.get("resolution", 1024),
             cfg_enabled=info.get("cfg_enabled", False),
         ))
     return result

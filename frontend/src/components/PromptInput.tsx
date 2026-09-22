@@ -29,7 +29,6 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
   const [steps, setSteps] = useState(40)
   const [cfgScale, setCfgScale] = useState(1.0)
   const [negativePrompt, setNegativePrompt] = useState('')
-  const [resolution, setResolution] = useState<1024 | 2048>(2048)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const isModelReady = modelStatus === 'ready' || modelStatus === undefined
@@ -129,7 +128,6 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
       options.true_cfg_scale = cfgScale
       options.negative_prompt = negativePrompt.trim()
     }
-    if (resolution !== 2048) options.resolution = resolution
 
     onGenerate(prompt, cleanImages, Object.keys(options).length > 0 ? options : undefined)
     setPrompt('')
@@ -345,24 +343,6 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
                     />
                   </div>
 
-                  <div className="space-y-3">
-                    <label className="text-xs font-mono text-muted-foreground">Resolution</label>
-                    <div className="flex gap-2">
-                      {([1024, 2048] as const).map((r) => (
-                        <button
-                          key={r}
-                          onClick={() => setResolution(r)}
-                          className={`flex-1 rounded-md py-1.5 text-xs font-mono ring-1 transition-colors ${
-                            resolution === r
-                              ? 'bg-primary/15 text-primary ring-primary/50'
-                              : 'text-muted-foreground ring-border hover:text-foreground'
-                          }`}
-                        >
-                          {r / 1024}K
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               </motion.div>
             </motion.div>

@@ -259,7 +259,7 @@ export default function Dashboard({ session }: DashboardProps) {
     setPendingGenParams({
       steps: options?.num_inference_steps ?? 40,
       numRefImages: images?.length ?? 0,
-      resolution: options?.resolution ?? 2048,
+      resolution: options?.resolution ?? 1024,
       cfgEnabled: Boolean(options?.true_cfg_scale && options.true_cfg_scale > 1),
     })
 

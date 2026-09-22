@@ -71,7 +71,7 @@ export function getActiveGenerationParams(
   return {
     steps: activeGeneration.num_inference_steps ?? 40,
     numRefImages: activeGeneration.num_ref_images ?? 0,
-    resolution: activeGeneration.resolution ?? 2048,
+    resolution: activeGeneration.resolution ?? 1024,
     cfgEnabled: activeGeneration.cfg_enabled ?? false,
   }
 }

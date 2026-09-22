@@ -128,7 +128,7 @@ class T2IRequest(BaseModel):
     prompt: str
     negative_prompt: str | None = None
     true_cfg_scale: float = 1.0
-    resolution: int = 2048
+    resolution: int = 1024
     size: str | None = None
     response_format: str = "b64_json"
     num_inference_steps: int = 40
@@ -139,7 +139,7 @@ class I2IRequest(BaseModel):
     images: list[str]
     negative_prompt: str | None = None
     true_cfg_scale: float = 1.0
-    resolution: int = 2048
+    resolution: int = 1024
     size: str | None = None
     response_format: str = "b64_json"
     num_inference_steps: int = 40
