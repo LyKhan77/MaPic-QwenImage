@@ -294,12 +294,15 @@ async def generation_status():
 
 @app.post("/v1/images/generations")
 async def text_to_image(req: T2IRequest):
+    global last_request_time
+    # Validasi sebelum mengambil lock: permintaan yang jelas salah tidak perlu
+    # menunggu generasi yang sedang berjalan.
+    if req.resolution > MAX_RESOLUTION:
+        return JSONResponse(status_code=400, content={
+            "error": f"Resolution {req.resolution} exceeds this server's limit of {MAX_RESOLUTION}"})
+
     async with _inference_lock:
-        global last_request_time
         last_request_time = time.time()
-        if req.resolution > MAX_RESOLUTION:
-            return JSONResponse(status_code=400, content={
-                "error": f"Resolution {req.resolution} exceeds this server's limit of {MAX_RESOLUTION}"})
 
         if req.size:
             width, height = _snap_to_32(req.size)
@@ -335,22 +338,23 @@ async def text_to_image(req: T2IRequest):
 
 @app.post("/v1/images/edits")
 async def image_to_image(req: I2IRequest):
-    async with _inference_lock:
-        global last_request_time
-        last_request_time = time.time()
-        if req.resolution > MAX_RESOLUTION:
-            return JSONResponse(status_code=400, content={
-                "error": f"Resolution {req.resolution} exceeds this server's limit of {MAX_RESOLUTION}"})
-        if not req.images:
-            return JSONResponse(status_code=400, content={"error": "At least one reference image is required"})
-        if len(req.images) > 10:
-            return JSONResponse(status_code=400, content={
-                "error": "Qwen-Image 2.1 supports at most 10 reference images"})
+    global last_request_time
+    if req.resolution > MAX_RESOLUTION:
+        return JSONResponse(status_code=400, content={
+            "error": f"Resolution {req.resolution} exceeds this server's limit of {MAX_RESOLUTION}"})
+    if not req.images:
+        return JSONResponse(status_code=400, content={"error": "At least one reference image is required"})
+    if len(req.images) > 10:
+        return JSONResponse(status_code=400, content={
+            "error": "Qwen-Image 2.1 supports at most 10 reference images"})
 
-        try:
-            ref_images = [_b64_to_pil(b).convert("RGB") for b in req.images]
-        except Exception as exc:
-            return JSONResponse(status_code=400, content={"error": f"Gambar referensi tidak bisa dibaca: {exc}"})
+    try:
+        ref_images = [_b64_to_pil(b).convert("RGB") for b in req.images]
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"error": f"Gambar referensi tidak bisa dibaca: {exc}"})
+
+    async with _inference_lock:
+        last_request_time = time.time()
 
         if req.size:
             width, height = _snap_to_32(req.size)
