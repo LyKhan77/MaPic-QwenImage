@@ -20,6 +20,19 @@ class QwenImageError(Exception):
     pass
 
 
+def _error_detail(response: httpx.Response) -> str:
+    """Ambil pesan error dari body JSON inference server, apa pun bentuknya."""
+    try:
+        payload = response.json()
+    except Exception:
+        return response.text[:300]
+    if isinstance(payload, dict):
+        for key in ("error", "detail"):
+            if payload.get(key):
+                return str(payload[key])
+    return str(payload)[:300]
+
+
 async def get_health_status() -> str:
     url = QWEN_IMAGE_API_URL.rstrip("/")
     try:
@@ -120,15 +133,20 @@ async def generate_image_bytes(
                 resp = await client.post(endpoint, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
-                b64 = data["data"][0]["b64_json"]
-                return base64.b64decode(b64)
+                images = data.get("data") or []
+                if not images or "b64_json" not in images[0]:
+                    raise QwenImageError(f"Respons Qwen-Image tidak berisi gambar: {str(data)[:200]}")
+                return base64.b64decode(images[0]["b64_json"])
         except httpx.ConnectError as exc:
             last_exc = exc
             logger.warning("Qwen-Image server not ready, retry %d/%d in %ds", attempt + 1, MAX_RETRIES, RETRY_DELAY)
             await asyncio.sleep(RETRY_DELAY)
         except httpx.HTTPStatusError as exc:
-            logger.exception("Qwen-Image server returned %s", exc.response.status_code)
-            raise QwenImageError(f"Qwen-Image error: {exc.response.text}") from exc
+            detail = _error_detail(exc.response)
+            logger.error("Qwen-Image server returned %s: %s", exc.response.status_code, detail)
+            raise QwenImageError(detail) from exc
+        except QwenImageError:
+            raise
         except Exception as exc:
             logger.exception("Qwen-Image request failed")
             raise QwenImageError(str(exc)) from exc

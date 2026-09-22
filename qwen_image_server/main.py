@@ -10,7 +10,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import Image
 from pydantic import BaseModel
 
@@ -298,7 +298,8 @@ async def text_to_image(req: T2IRequest):
         global last_request_time
         last_request_time = time.time()
         if req.resolution > MAX_RESOLUTION:
-            return {"error": f"Resolution {req.resolution} exceeds this server's limit of {MAX_RESOLUTION}"}
+            return JSONResponse(status_code=400, content={
+                "error": f"Resolution {req.resolution} exceeds this server's limit of {MAX_RESOLUTION}"})
 
         if req.size:
             width, height = _snap_to_32(req.size)
@@ -324,7 +325,7 @@ async def text_to_image(req: T2IRequest):
             data = await comfy.run(graph, on_stage=_set_stage)
         except ComfyError as exc:
             logger.error("T2I gagal: %s", exc)
-            return {"error": str(exc)}
+            return JSONResponse(status_code=502, content={"error": str(exc)})
         finally:
             update_gen_state("idle")
 
@@ -338,16 +339,18 @@ async def image_to_image(req: I2IRequest):
         global last_request_time
         last_request_time = time.time()
         if req.resolution > MAX_RESOLUTION:
-            return {"error": f"Resolution {req.resolution} exceeds this server's limit of {MAX_RESOLUTION}"}
+            return JSONResponse(status_code=400, content={
+                "error": f"Resolution {req.resolution} exceeds this server's limit of {MAX_RESOLUTION}"})
         if not req.images:
-            return {"error": "At least one reference image is required"}
+            return JSONResponse(status_code=400, content={"error": "At least one reference image is required"})
         if len(req.images) > 10:
-            return {"error": "Qwen-Image 2.1 supports at most 10 reference images"}
+            return JSONResponse(status_code=400, content={
+                "error": "Qwen-Image 2.1 supports at most 10 reference images"})
 
         try:
             ref_images = [_b64_to_pil(b).convert("RGB") for b in req.images]
         except Exception as exc:
-            return {"error": f"Gambar referensi tidak bisa dibaca: {exc}"}
+            return JSONResponse(status_code=400, content={"error": f"Gambar referensi tidak bisa dibaca: {exc}"})
 
         if req.size:
             width, height = _snap_to_32(req.size)
@@ -380,7 +383,7 @@ async def image_to_image(req: I2IRequest):
             data = await comfy.run(graph, on_stage=_set_stage)
         except ComfyError as exc:
             logger.error("I2I gagal: %s", exc)
-            return {"error": str(exc)}
+            return JSONResponse(status_code=502, content={"error": str(exc)})
         finally:
             update_gen_state("idle")
 
