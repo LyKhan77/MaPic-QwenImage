@@ -25,6 +25,7 @@ project references :
 - **Configurable generation params:** `num_inference_steps` (20-75, default 40), `true_cfg_scale` (1.0-3.0, default 1.0 = guidance off, butuh negative prompt) — lewat modal settings frontend. Selector resolusi sudah disembunyikan karena host ini 1K saja.
 - **Frontend:** input di bar bawah otomatis membawa prompt + gambar hasil sebagai referensi sehingga iterasi I2I jalan dari UI. Modal settings di-portal ke `document.body` karena `backdrop-filter` pada root-nya menjadikan elemen itu containing block untuk `position: fixed`.
 - **Docs deploy:** `deploy/docker/README.md` — operasional, struktur folder model, catatan GPU, dan cara rebuild per layanan.
+- **Jalur publik ditutup (2026-09-23):** project Vercel `mapic-glm` dihapus, `frontend/vercel.json` dan endpoint `/api/tunnel-status` ikut dibuang. Tidak ada titik masuk dari luar jaringan kantor; akses hanya `http://192.168.2.142:5151`. Mengembalikannya menuntut HTTPS di backend juga, karena browser memblokir halaman HTTPS yang memanggil backend HTTP.
 
 ### Key Files
 | File | Role |
