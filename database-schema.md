@@ -23,7 +23,7 @@ PY
 
 | Product | Usage |
 | --- | --- |
-| Auth | Login/sesi frontend lewat Supabase Auth (email + password; Google dinonaktifkan). Backend memverifikasi access token di setiap request. Saat review: 5 user terdaftar. |
+| Auth | Login/sesi frontend lewat Supabase Auth (email + password; provider Google dimatikan, akun Google terakhir dihapus 2026-09-23). Backend memverifikasi access token di setiap request. Saat review: 4 user terdaftar. |
 | Postgres | Menyimpan riwayat generasi di `public.generations`. Saat review: 16 baris. |
 | Storage | PNG hasil generasi di bucket `generated_images`. Bucket `generated_videos` masih ada sebagai sisa fitur video, tidak dipakai kode saat ini. |
 
