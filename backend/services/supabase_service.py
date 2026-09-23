@@ -140,7 +140,9 @@ def delete_generation(gen_id: UUID, user_id: UUID) -> None:
     )
     _raise_on_error(response, "Failed to find generation")
 
-    rows = getattr(response, "data", None) or response.get("data") or []
+    rows = getattr(response, "data", None)
+    if rows is None and isinstance(response, dict):
+        rows = response.get("data")
     if not rows:
         raise GenerationNotFound("Generation not found")
 
