@@ -11,6 +11,28 @@ Empat layanan, masing-masing satu folder dengan Dockerfile sendiri:
 
 Model tetap tinggal di host (`~/apps/qwen21-gguf`) dan di-mount read-only. Mengganti kuantisasi cukup dengan menukar file di folder itu, tanpa build ulang.
 
+## Struktur folder model
+
+ComfyUI memindai folder berdasarkan `comfyui/extra_model_paths.yaml`. Tata letak yang diharapkan:
+
+```
+~/apps/qwen21-gguf/                 → di-mount sebagai /models (read-only)
+├── diffusion_models/
+│   └── qwen-image-2.1-Q8_0.gguf    → boleh symlink ke file di luar folder
+├── text_encoders/
+│   └── qwen3vl_8b_int8_convrot.safetensors
+└── vae/
+    └── qwen_image_2.1_vae_bf16.safetensors
+```
+
+`diffusion_models/` mudah terlewat: tanpa folder itu, ComfyUI mengembalikan daftar kosong dan facade akan melaporkan `unet_name ... not in []`. Kalau file GGUF berada di lokasi lain, cukup buat symlink:
+
+```bash
+mkdir -p ~/apps/qwen21-gguf/diffusion_models
+ln -sfn ../qwen-image-2.1-Q8_0.gguf ~/apps/qwen21-gguf/diffusion_models/
+docker compose restart comfyui    # folder dipindai saat start
+```
+
 ## Menjalankan
 
 ```bash
@@ -123,3 +145,5 @@ sudo systemctl enable --now comfyui qwen-image mapic-backend mapic-frontend
 ```
 
 Jangan jalankan keduanya bersamaan — port dan VRAM akan bentrok.
+
+> `start-app.sh` di root repo juga memakai port **5151**, jadi ia akan bentrok dengan container `frontend`. Jalankan salah satu saja: stack Docker (`docker compose up -d`) atau skrip dev itu, bukan keduanya.
