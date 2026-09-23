@@ -17,6 +17,10 @@ class SupabaseError(Exception):
     pass
 
 
+class GenerationNotFound(SupabaseError):
+    """Baris tidak ada, atau ada tapi bukan milik user yang meminta."""
+
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
@@ -124,17 +128,24 @@ def fetch_history(user_id: UUID) -> list[dict]:
 
     return data
 
-def delete_generation(gen_id: UUID) -> None:
-    # 1. Get generation info to find image_path
-    response = supabase.table("generations").select("image_path").eq("id", str(gen_id)).single().execute()
+def delete_generation(gen_id: UUID, user_id: UUID) -> None:
+    # 1. Cari record milik user ini — sekaligus memastikan barisnya bukan milik
+    #    user lain. Record milik orang lain tampak sebagai "tidak ada".
+    response = (
+        supabase.table("generations")
+        .select("image_path")
+        .eq("id", str(gen_id))
+        .eq("user_id", str(user_id))
+        .execute()
+    )
     _raise_on_error(response, "Failed to find generation")
-    
-    data = getattr(response, "data", None) or response.get("data")
-    if not data:
-        raise SupabaseError("Generation not found")
-        
-    image_path = data.get("image_path")
-    
+
+    rows = getattr(response, "data", None) or response.get("data") or []
+    if not rows:
+        raise GenerationNotFound("Generation not found")
+
+    image_path = rows[0].get("image_path")
+
     # 2. Delete file from storage
     if image_path:
         storage_res = supabase.storage.from_(BUCKET_NAME).remove([image_path])
@@ -142,5 +153,11 @@ def delete_generation(gen_id: UUID) -> None:
         # but for now we proceed to delete DB record.
 
     # 3. Delete DB record
-    del_res = supabase.table("generations").delete().eq("id", str(gen_id)).execute()
+    del_res = (
+        supabase.table("generations")
+        .delete()
+        .eq("id", str(gen_id))
+        .eq("user_id", str(user_id))
+        .execute()
+    )
     _raise_on_error(del_res, "Failed to delete generation record")

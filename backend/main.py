@@ -5,16 +5,17 @@ from uuid import UUID, uuid4
 import logging
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 import uvicorn.logging
 
 try:
+    from backend.auth import require_user
     from backend.config import CORS_ORIGINS, QWEN_IMAGE_API_URL
     from backend.schemas import ActiveGeneration, GenerateRequest, Generation
-    from backend.services.qwen_image_service import QwenImageError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model, stream_load_model
+    from backend.services.qwen_image_service import QwenImageError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model
     from backend.services.supabase_service import (
+        GenerationNotFound,
         SupabaseError,
         fetch_history,
         insert_generation,
@@ -22,10 +23,12 @@ try:
         delete_generation,
     )
 except ModuleNotFoundError:
+    from auth import require_user
     from config import CORS_ORIGINS, QWEN_IMAGE_API_URL
     from schemas import ActiveGeneration, GenerateRequest, Generation
-    from services.qwen_image_service import QwenImageError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model, stream_load_model
+    from services.qwen_image_service import QwenImageError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model
     from services.supabase_service import (
+        GenerationNotFound,
         SupabaseError,
         fetch_history,
         insert_generation,
@@ -77,12 +80,8 @@ async def api_health():
     return {"status": status}
 
 
-@app.get("/api/load/stream")
-async def api_load_stream():
-    return StreamingResponse(stream_load_model(), media_type="text/event-stream")
-
 @app.post("/api/load")
-async def api_load():
+async def api_load(_: UUID = Depends(require_user)):
     try:
         result = await load_model()
         return result
@@ -91,7 +90,7 @@ async def api_load():
 
 
 @app.post("/api/unload")
-async def api_unload():
+async def api_unload(_: UUID = Depends(require_user)):
     try:
         result = await unload_model()
         return result
@@ -100,7 +99,7 @@ async def api_unload():
 
 
 @app.get("/api/load/state")
-async def api_load_state():
+async def api_load_state(_: UUID = Depends(require_user)):
     try:
         return await get_load_state()
     except Exception as exc:
@@ -109,7 +108,7 @@ async def api_load_state():
 
 
 @app.get("/api/generations/status")
-async def api_generation_status():
+async def api_generation_status(_: UUID = Depends(require_user)):
     try:
         return await get_generation_status()
     except Exception as exc:
@@ -118,7 +117,7 @@ async def api_generation_status():
 
 
 @app.get("/api/generations/active", response_model=list[ActiveGeneration])
-async def api_active_generations():
+async def api_active_generations(_: UUID = Depends(require_user)):
     now = time.time()
     result = []
     for gen_id, info in _active_generations.items():
@@ -137,7 +136,7 @@ async def api_active_generations():
 
 
 @app.post("/api/generate", response_model=Generation)
-async def generate(payload: GenerateRequest):
+async def generate(payload: GenerateRequest, user_id: UUID = Depends(require_user)):
     if not _can_accept_generation(_active_generations):
         raise HTTPException(
             status_code=429,
@@ -146,7 +145,7 @@ async def generate(payload: GenerateRequest):
 
     gen_id = str(uuid4())
     _active_generations[gen_id] = {
-        "user_id": payload.user_id,
+        "user_id": user_id,
         "prompt": payload.prompt,
         "queued_at": time.time(),
         "started_at": None,
@@ -176,8 +175,8 @@ async def generate(payload: GenerateRequest):
         if active_info is not None:
             active_info["status"] = "saving"
 
-        image_path, public_url = upload_image(payload.user_id, image_bytes)
-        record = insert_generation(payload.user_id, payload.prompt, image_path, public_url)
+        image_path, public_url = upload_image(user_id, image_bytes)
+        record = insert_generation(user_id, payload.prompt, image_path, public_url)
         return record
     except QwenImageError as exc:
         logger.exception("Qwen-Image error during generate")
@@ -193,7 +192,9 @@ async def generate(payload: GenerateRequest):
 
 
 @app.get("/api/history/{user_id}", response_model=list[Generation])
-async def history(user_id: UUID):
+async def history(user_id: UUID, current_user: UUID = Depends(require_user)):
+    if user_id != current_user:
+        raise HTTPException(status_code=403, detail="Cannot read another user's history")
     try:
         return fetch_history(user_id)
     except SupabaseError as exc:
@@ -205,10 +206,12 @@ async def history(user_id: UUID):
 
 
 @app.delete("/api/history/{id}")
-async def delete_history_item(id: UUID):
+async def delete_history_item(id: UUID, user_id: UUID = Depends(require_user)):
     try:
-        delete_generation(id)
+        delete_generation(id, user_id)
         return {"ok": True}
+    except GenerationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SupabaseError as exc:
         logger.exception("Supabase error during delete")
         raise HTTPException(status_code=502, detail=str(exc)) from exc

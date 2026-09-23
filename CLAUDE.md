@@ -26,6 +26,7 @@ project references :
 - **Frontend:** input di bar bawah otomatis membawa prompt + gambar hasil sebagai referensi sehingga iterasi I2I jalan dari UI. Modal settings di-portal ke `document.body` karena `backdrop-filter` pada root-nya menjadikan elemen itu containing block untuk `position: fixed`.
 - **Docs deploy:** `deploy/docker/README.md` — operasional, struktur folder model, catatan GPU, dan cara rebuild per layanan.
 - **Jalur publik ditutup (2026-09-23):** project Vercel lama dihapus, `frontend/vercel.json` dan endpoint `/api/tunnel-status` ikut dibuang. Tidak ada titik masuk dari luar jaringan kantor; akses hanya `http://192.168.2.142:5151`. Mengembalikannya menuntut HTTPS di backend juga, karena browser memblokir halaman HTTPS yang memanggil backend HTTP.
+- **Auth API (2026-09-23):** semua endpoint backend kecuali `GET /api/health` menuntut `Authorization: Bearer <access token Supabase>`. Backend memverifikasi tanda tangan lewat JWKS project (ES256) dengan dependency `require_user` (`backend/auth.py`) dan memakai claim `sub` sebagai identitas — `user_id` dari body/URL tidak lagi dipercaya (`user_id` dihapus dari `GenerateRequest`, riwayat & hapus dibatasi ke pemilik token). Endpoint `/api/load/stream` (SSE) dihapus karena `EventSource` tidak bisa mengirim header; progres load dibaca lewat `GET /api/load/state`. Login UI: email + password, Google dinonaktifkan.
 
 ### Key Files
 | File | Role |
@@ -85,7 +86,7 @@ MaPic/
 │       ├── types.ts                   # Shared TypeScript interfaces (Generation)
 │       ├── index.css                  # Global styles + Tailwind directives
 │       ├── pages/
-│       │   ├── Login.tsx              # Supabase Auth UI login page (Google OAuth)
+│       │   ├── Login.tsx              # Login email + password lewat Supabase Auth
 │       │   └── Dashboard.tsx          # Main app UI — orchestrates canvas, sidebar, prompt, model status
 │       ├── components/
 │       │   ├── ImageCanvas.tsx        # Displays generated image, download & copy actions

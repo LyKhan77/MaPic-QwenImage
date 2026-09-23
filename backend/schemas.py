@@ -12,7 +12,6 @@ except ModuleNotFoundError:
 
 class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
-    user_id: UUID
     images: list[str] | None = Field(default=None, max_length=10)
     negative_prompt: str | None = Field(default=None, max_length=2000)
     true_cfg_scale: float = Field(default=1.0, ge=1.0, le=3.0)

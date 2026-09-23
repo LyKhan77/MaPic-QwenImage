@@ -238,7 +238,7 @@ export default function Dashboard({ session }: DashboardProps) {
       cfgEnabled: Boolean(options?.true_cfg_scale && options.true_cfg_scale > 1),
     })
 
-    void api.generateImage(prompt, session.user.id, images, options)
+    void api.generateImage(prompt, images, options)
       .then((newGen) => {
         queryClient.setQueryData(['history', session.user.id], (old: Generation[] = []) => [newGen, ...old.filter(item => item.id !== newGen.id)])
         setCurrentGen(newGen)

@@ -51,16 +51,6 @@ async def load_model() -> dict:
         resp.raise_for_status()
         return resp.json()
 
-async def stream_load_model():
-    url = QWEN_IMAGE_API_URL.rstrip("/")
-    # Disable timeout for the stream as loading can take > 5 minutes
-    async with httpx.AsyncClient(timeout=None) as client:
-        async with client.stream("GET", f"{url}/v1/system/load/stream") as response:
-            async for line in response.aiter_lines():
-                if line:
-                    yield f"{line}\n\n"
-
-
 async def unload_model() -> dict:
     url = QWEN_IMAGE_API_URL.rstrip("/")
     async with httpx.AsyncClient(timeout=30) as client:

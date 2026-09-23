@@ -19,6 +19,23 @@ The React frontend (`:5151`) communicates exclusively with the **MaPic Backend**
 
 ## MaPic Backend API (`http://localhost:8281/api`)
 
+### Authentication
+
+Semua endpoint kecuali `GET /api/health` memerlukan header:
+
+```
+Authorization: Bearer <access_token Supabase>
+```
+
+Backend memverifikasi tanda tangan token lewat JWKS project (kunci asimetris ES256/RS256) dan memakai claim `sub` sebagai identitas user. `user_id` yang dikirim klien di body atau URL **diabaikan/diverifikasi**, sehingga tidak ada lagi cara memanggil API sebagai user lain hanya dengan menebak UUID.
+
+| Kode | Arti |
+|---|---|
+| `401` | Header `Authorization` tidak ada, atau token tidak valid/kedaluwarsa |
+| `403` | Token valid, tetapi mencoba membaca riwayat milik user lain |
+
+Frontend mengambil token dari sesi Supabase aktif (`supabase.auth.getSession()`) dan menempelkannya ke setiap request di `frontend/src/lib/api.ts`.
+
 ### `GET /api/health`
 Check the health status of the downstream Qwen-Image Server.
 
@@ -34,23 +51,6 @@ Check the health status of the downstream Qwen-Image Server.
 - `loading` — Model is currently being loaded into GPU memory.
 - `unloaded` — Model is not loaded (VRAM freed).
 - `offline` — Qwen-Image Server is unreachable.
-
----
-
-### `GET /api/load/stream`
-Stream model loading progress via Server-Sent Events (SSE).
-
-**Response:** `text/event-stream`
-
-**Event format:**
-```json
-data: {"progress": 20, "message": "Loading pipeline weights..."}
-
-data: {"progress": 100, "message": "Ready."}
-```
-
-**Description:**
-Used by the frontend to show a real-time progress bar while the Qwen-Image 2.1 model is being loaded. If the model is already loaded, it immediately returns `progress: 100`. If an error occurs, it returns `error: true`.
 
 ---
 
@@ -110,7 +110,6 @@ Generate an image from a text prompt (T2I) or from a prompt + reference images (
 ```json
 {
   "prompt": "A futuristic cityscape at sunset",
-  "user_id": "550e8400-e29b-41d4-a716-446655440000",
   "images": ["base64encodedstring..."],
   "negative_prompt": "blurry, low quality",
   "true_cfg_scale": 1.0,
@@ -139,6 +138,7 @@ Generate an image from a text prompt (T2I) or from a prompt + reference images (
 - `true_cfg_scale` accepts `1.0` to `3.0`. Qwen-Image 2.1 is sampled without guidance by default, so CFG only activates when `true_cfg_scale` is above `1.0` **and** `negative_prompt` is set — that roughly doubles the time per denoising step.
 - At most 10 reference images are accepted per request.
 - The backend accepts up to 10 queued/running/saving generation jobs globally.
+- Pemilik hasil adalah `sub` dari token, bukan field di body — klien tidak bisa menitipkan pekerjaan atas nama user lain.
 - The generated image is uploaded to Supabase Storage and a database record is created.
 - Returns the full `Generation` record including the public CDN URL.
 
@@ -210,9 +210,11 @@ Fetch the generation history for a specific user.
 ```
 
 **Description:**
-Returns all generations for the user, sorted by `created_at` descending (newest first).
+Returns all generations for the user, sorted by `created_at` descending (newest first). `user_id` harus sama dengan `sub` di token; permintaan untuk user lain ditolak sebelum menyentuh Supabase.
 
 **Errors:**
+- `401` — Token tidak ada/tidak valid.
+- `403` — `user_id` berbeda dari pemilik token.
 - `502` — Supabase query error.
 - `500` — Internal server error.
 
@@ -232,11 +234,13 @@ Delete a generation record and its associated image from storage.
 ```
 
 **Description:**
-1. Looks up the generation record to find the `image_path`.
+1. Looks up the generation record **milik user pemilik token** — baris milik user lain tidak terlihat sama sekali.
 2. Deletes the image file from Supabase Storage.
 3. Deletes the database record from the `generations` table.
 
 **Errors:**
+- `401` — Token tidak ada/tidak valid.
+- `404` — Record tidak ditemukan, atau bukan milik user pemilik token.
 - `502` — Supabase error.
 - `500` — Internal server error.
 
@@ -269,7 +273,7 @@ data: {"progress": 10, "message": "Initializing loading..."}
 ```
 
 **Description:**
-Starts model loading in a background thread and streams progress updates. Used by the backend's `/api/load/stream` endpoint.
+Starts model loading in a background thread and streams progress updates. Endpoint internal facade — backend tidak lagi memakainya (progress model dibaca lewat `/v1/system/load/state`), dan tidak diteruskan ke klien.
 
 ---
 
@@ -399,7 +403,6 @@ Image-to-image generation (multi-reference).
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `prompt` | `string` | Yes | Text prompt (max 2000 chars). |
-| `user_id` | `UUID` | Yes | The user's UUID for auth and history tracking. |
 | `images` | `list[string]` | No | Base64-encoded reference images for I2I (max 10). |
 | `negative_prompt` | `string` | No | Text to steer away from; required for CFG to activate. |
 | `true_cfg_scale` | `number` | No | CFG scale, `1.0..3.0`, default `1.0` (guidance off). |

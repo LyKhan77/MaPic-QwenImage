@@ -16,7 +16,7 @@ MaPic turns text prompts and reference images into production-quality visuals wi
 *   **Active Generation Recovery:** The active generation indicator shows queued/running/saving jobs, rehydrates the current user's active job view after refresh, and auto-focuses the latest finished result (including multi-queue completion order).
 *   **Configurable Generation Params:** Frontend exposes `num_inference_steps` and True CFG scale (with negative prompt). Resolusi terkunci di 1K — 2048 ditolak host ini.
 *   **History Management:** Generated images and prompts are saved to Supabase and can be viewed, selected, or deleted.
-*   **Secure Auth:** Google OAuth 2.0 via Supabase Authentication.
+*   **Secure Auth:** Supabase Authentication (email + password). API backend memverifikasi token Supabase di setiap request; identitas user diambil dari claim `sub`.
 *   **Responsive UI:** Collapsible sidebar, dark/light mode, Framer Motion animations, and mobile-friendly layout.
 *   **Share & Download:** Download images or copy direct public links.
 
@@ -164,7 +164,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://192.168.2.142:5151
 ## 🖼️ Usage
 
 1.  Open `http://192.168.2.142:5151` (hanya dari jaringan kantor).
-2.  Login with Google through Supabase Auth.
+2.  Login dengan email + password (Supabase Auth).
 3.  Type a prompt in the bottom prompt input.
 4.  Optionally attach up to 10 reference images.
 5.  Adjust inference steps, or True CFG scale with a negative prompt, if needed. Resolusi terkunci di 1K.
