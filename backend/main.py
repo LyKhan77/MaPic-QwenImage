@@ -1,8 +1,6 @@
 import time
 import asyncio
-import re
 from uuid import UUID, uuid4
-from pathlib import Path
 
 import logging
 
@@ -77,26 +75,6 @@ app.add_middleware(
 async def api_health():
     status = await get_health_status()
     return {"status": status}
-
-
-@app.get("/api/tunnel-status")
-async def api_tunnel_status():
-    tunnel_url = None
-    tunnel_log = Path("/tmp/cloudflared-tunnel.log")
-    if tunnel_log.exists():
-        try:
-            text = tunnel_log.read_text()
-            matches = re.findall(r'https://[a-z0-9-]+\.trycloudflare\.com', text)
-            if matches:
-                tunnel_url = matches[-1]
-        except Exception:
-            pass
-
-    return {
-        "tunnel_url": tunnel_url,
-        "vercel_dashboard": "https://vercel.com/lees-projects-80730ffd/mapic-glm/settings/environment-variables",
-    }
-
 
 
 @app.get("/api/load/stream")

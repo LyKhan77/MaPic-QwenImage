@@ -49,7 +49,7 @@ Berjalan sepenuhnya di jaringan kantor, sebagai container Docker di `gspe-ai2`:
 | Backend health | `http://192.168.2.142:8281/api/health` | Status rantai ke facade |
 | ComfyUI | `127.0.0.1:8188` | Debug saja; dari komputer lain pakai SSH tunnel |
 
-Vercel dan Cloudflare Tunnel **tidak lagi dipakai**. Bagian di bawah disimpan hanya sebagai rujukan historis bila nanti ingin mengekspos ke publik lagi — dan perlu diingat halaman HTTPS tidak bisa memanggil backend HTTP (mixed content), jadi tunnel/HTTPS tetap diperlukan untuk itu.
+Jalur publik sudah **ditutup** (2026-09-23): project Vercel `mapic-glm` dan tunnel Cloudflare tidak dipakai lagi, sehingga tidak ada titik masuk dari luar jaringan kantor. Alasan teknisnya: halaman HTTPS tidak boleh memanggil backend HTTP (mixed content), jadi mengekspos frontend ke publik selalu menuntut tunnel HTTPS tambahan — satu titik gagal yang tidak dibutuhkan karena semua pengguna ada di kantor.
 
 ## 🛠️ Tech Stack
 
@@ -60,12 +60,11 @@ Vercel dan Cloudflare Tunnel **tidak lagi dipakai**. Bagian di bawah disimpan ha
 *   **State Management:** TanStack Query
 *   **Animations:** Framer Motion
 *   **Notifications:** Sonner
-*   **Hosting:** Vercel
+*   **Hosting:** container nginx di jaringan kantor (build statis Vite)
 
 ### Backend
 *   **Framework:** Python FastAPI
 *   **Database & Storage:** Supabase PostgreSQL + Storage
-*   **Tunnel:** Cloudflare Tunnel to local `:8281`
 *   **AI Service Client:** HTTP client to the Qwen-Image 2.1 server
 
 ### Inference Server
@@ -84,8 +83,6 @@ Vercel dan Cloudflare Tunnel **tidak lagi dipakai**. Bagian di bawah disimpan ha
 *   Python 3.10+
 *   CUDA-capable NVIDIA GPUs
 *   Supabase project with Auth, PostgreSQL, and Storage configured
-*   `cloudflared` for production tunnel access
-*   Vercel account/CLI for frontend deployment
 
 ### 1. Clone the Repository
 
@@ -151,60 +148,22 @@ Untuk mode pengembangan frontend (hot reload), jalankan terpisah di port berbeda
 cd frontend && VITE_API_URL=http://localhost:8281/api npm run dev -- --port 5152
 ```
 
-## 🚢 (Historis) Production Frontend + Tunnel
-
-> Sejak 2026-09-23 MaPic berjalan penuh di jaringan kantor lewat Docker. Vercel dan Cloudflare Tunnel tidak dipakai lagi; bab ini disimpan sebagai rujukan bila nanti ingin mengekspos ke publik lagi.
-
-### Vercel Environment Variables
-
-Set these in Vercel project settings for Production:
-
-```env
-VITE_API_URL=https://api.mapic-backend.site/api
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
-```
-
-`VITE_API_URL` must include the `/api` suffix because the backend routes are mounted under `/api`.
-
-### Start Cloudflare Tunnel
-
-```bash
-cloudflared tunnel run mapic-backend
-```
-
-The named tunnel uses `api.mapic-backend.site` — a permanent URL that does not change on restart.
-
-### Deploy Frontend
-
-```bash
-cd frontend
-vercel --prod
-```
-
-The frontend is a static React SPA. `frontend/vercel.json` rewrites all routes to `index.html` for client-side routing.
-
 ## ✅ Health Checks
 
 ```bash
-# Qwen-Image server
+# Qwen-Image server (di server, via SSH)
 curl -s http://localhost:30000/health
 
-# Backend local
-curl -s http://localhost:8281/api/health
+# Backend
+curl -s http://192.168.2.142:8281/api/health
 
-# Backend through tunnel
-curl -s https://api.mapic-backend.site/api/health
-
-# Verify tunnel reaches MaPic backend
-curl -s https://api.mapic-backend.site/openapi.json \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['title'])"
-# Expected: Mapic API
+# Frontend
+curl -s -o /dev/null -w '%{http_code}\n' http://192.168.2.142:5151
 ```
 
 ## 🖼️ Usage
 
-1.  Open `https://mapic-glm.vercel.app` or local frontend `http://localhost:5151`.
+1.  Open `http://192.168.2.142:5151` (hanya dari jaringan kantor).
 2.  Login with Google through Supabase Auth.
 3.  Type a prompt in the bottom prompt input.
 4.  Optionally attach up to 10 reference images.
@@ -218,15 +177,13 @@ MaPic accepts a maximum of 10 active or queued generation requests globally. Whe
 
 ## 🔧 Troubleshooting
 
-Use [vercel-docs.md](vercel-docs.md) for detailed production troubleshooting.
-
 Common checks:
 
-*   If the frontend shows offline, verify the tunnel is running and `VITE_API_URL` points to the current tunnel URL.
-*   If browser console shows CORS errors, confirm backend `CORS_ORIGINS` includes `https://mapic-glm.vercel.app`.
-*   If the tunnel reaches the wrong app, check `~/.cloudflared/config.yml` and confirm ingress points to `http://localhost:8281`.
-*   If Supabase login fails on Vercel, confirm Vercel env vars and Supabase redirect URLs include `https://mapic-glm.vercel.app`.
-*   If model status is offline, check both `http://localhost:30000/health` and `http://localhost:8281/api/health`.
+*   If the frontend shows offline, cek `http://192.168.2.142:8281/api/health` dari komputer yang sama dengan browser.
+*   If browser console shows CORS errors, pastikan origin frontend ada di `CORS_ORIGINS` (`backend/.env`). Default repo sudah memuat `http://192.168.2.142:5151`.
+*   If Supabase login fails, pastikan Supabase → Authentication → URL Configuration memuat `http://192.168.2.142:5151`.
+*   If model status is offline, cek `http://localhost:30000/health` dan `http://localhost:8281/api/health` di server.
+*   Operasional container (log, rebuild, GPU): [`deploy/docker/README.md`](deploy/docker/README.md).
 
 ## ⚡ Creator
 

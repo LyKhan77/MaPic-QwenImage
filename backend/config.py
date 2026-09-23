@@ -22,4 +22,4 @@ if QWEN_DEFAULT_RESOLUTION not in (1024, 2048):
     raise RuntimeError("QWEN_DEFAULT_RESOLUTION must be 1024 or 2048")
 MODEL_NAME = "qwen-image-2.1"
 
-CORS_ORIGINS = _get_env("CORS_ORIGINS", "http://localhost:5151,http://localhost:5152,http://127.0.0.1:5151,http://127.0.0.1:5152,https://mapic-glm.vercel.app")
+CORS_ORIGINS = _get_env("CORS_ORIGINS", "http://localhost:5151,http://localhost:5152,http://127.0.0.1:5151,http://127.0.0.1:5152,http://192.168.2.142:5151")
