@@ -22,23 +22,13 @@ temp/
 *test/
 mapic-glm.service
 start-mapic-glm.sh
-# Documentation — hanya dokumen inti yang dilacak; sisanya diabaikan
-*.md
-!README.md
-!API.md
-!ARCHITECTURE.md
-!WORKFLOW.md
-!database-schema.md
-!vercel-docs.md
-!AGENTS.md
-!CLAUDE.md
+# Dokumentasi (.md) dilacak seluruhnya — tidak ada dokumentasi yang diabaikan.
+# Hanya catatan sesi (plans) yang diabaikan; file-nya tetap ada di disk,
+# hanya tidak ikut masuk repo.
+docs/plans/
+docs/superpowers/plans/
 .gemini/
-
-# Superpowers plans & specs are tracked as session records
-!docs/superpowers/plans/
-!docs/superpowers/plans/*.md
-!docs/superpowers/specs/
-!docs/superpowers/specs/*.md
+.commandcode/
 
 # Test files
 test_*.py

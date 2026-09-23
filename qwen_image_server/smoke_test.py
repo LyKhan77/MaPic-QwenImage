@@ -4,8 +4,8 @@ Jalankan di server target dengan venv inference aktif:
 
     python smoke_test.py --resolution 1024 --steps 40 --refs 0
 
-Hasilnya dipakai untuk mengisi tabel kalibrasi di
-docs/superpowers/plans/2026-09-21-qwen-image-2.1-migration.md (Fase 0).
+Hasilnya dipakai untuk mengisi tabel kalibrasi host target (VRAM, timing, dan
+batas resolusi) di AGENTS.md.
 """
 
 import argparse
