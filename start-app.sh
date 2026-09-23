@@ -1,57 +1,50 @@
 #!/bin/bash
+#
+# MaPic — menjalankan stack lewat Docker Compose.
+#
+# Sejak migrasi ke Docker (2026-09-23) skrip ini tidak lagi menyalakan service
+# sendiri: ComfyUI, facade, backend, dan frontend semuanya container yang dikelola
+# docker compose di deploy/docker/. Menyalakan service secara manual akan bentrok
+# di port 5151 dan VRAM.
 
-# Function to clean up background processes on exit
-cleanup() {
-    echo ""
-    echo "Stopping MaPic services..."
-    kill $(jobs -p) 2>/dev/null
-    wait $(jobs -p) 2>/dev/null
-    echo "Services stopped."
-    exit 0
-}
+set -euo pipefail
 
-# Trap SIGINT (Ctrl+C) and SIGTERM
-trap cleanup SIGINT SIGTERM
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+COMPOSE_DIR="$ROOT/deploy/docker"
 
-echo "Starting MaPic..."
-
-# PyTorch memory optimization: reduce fragmentation that leads to OOM
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
-
-# Start Qwen-Image 2.1 Server
-echo "Starting Qwen-Image 2.1 Server on port 30000..."
-cd qwen_image_server
-if [ -d "venv" ]; then
-    source venv/bin/activate
-elif [ -d ".venv" ]; then
-    source .venv/bin/activate
+if ! command -v docker >/dev/null 2>&1; then
+    echo "Docker tidak ditemukan di PATH." >&2
+    exit 1
 fi
-python -m uvicorn main:app --host 0.0.0.0 --port 30000 &
-cd ..
 
-# Start Backend
-echo "Starting Backend on port 8181..."
-cd backend
-# Check if virtual environment exists, if not, warn user
-if [ -d "venv" ]; then
-    source venv/bin/activate
-elif [ -d ".venv" ]; then
-    source .venv/bin/activate
+cd "$COMPOSE_DIR"
+
+if [ ! -f .env ]; then
+    echo "Peringatan: $COMPOSE_DIR/.env belum ada."
+    echo "Salin dari .env.example lalu isi VITE_API_URL dan kredensial Supabase anon."
+    echo "Lanjut tanpa file itu: image frontend akan memakai nilai default."
+    echo
 fi
-python -m uvicorn main:app --host 0.0.0.0 --port 8181 --reload &
-cd ..
 
-# Start Frontend
-echo "Starting Frontend on port 5151..."
-cd frontend
-npm run dev &
-cd ..
+echo "Menjalankan stack MaPic (build bila image belum ada)..."
+docker compose up -d
 
-echo "MaPic is running!"
-echo "- Frontend:     http://localhost:5151"
-echo "- Backend:      http://localhost:8181"
-echo "- Qwen-Image:   http://localhost:30000"
-echo "Press Ctrl+C to stop all services."
+echo
+docker compose ps
 
-# Wait for all background processes
-wait
+cat <<'EOF'
+
+Alamat
+  Frontend  : http://<ip-server>:5151
+  Backend   : http://<ip-server>:8281/api
+  ComfyUI   : http://127.0.0.1:8188  (debug; dari komputer lain pakai SSH tunnel)
+
+Perintah lanjutan
+  docker compose logs -f comfyui     log satu layanan
+  docker compose ps                  status + healthcheck
+  docker compose down                hentikan semua (model tetap di host)
+
+Mode pengembangan frontend (hot reload) — jalankan terpisah, jangan bersamaan
+dengan container frontend karena portnya sama:
+  cd frontend && VITE_API_URL=http://localhost:8281/api npm run dev -- --port 5152
+EOF

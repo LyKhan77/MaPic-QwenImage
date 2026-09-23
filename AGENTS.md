@@ -9,46 +9,35 @@ project references :
 =====================
 
 # Current State - Update this Section for every CHANGES and UPDATES
-## Architecture: Qwen-Image 2.1 Multi-GPU (2026-09-21)
+## Architecture: Qwen-Image 2.1 + ComfyUI GGUF, di Docker (2026-09-23)
 
-- **Single model:** Qwen-Image 2.1 (`Qwen/Qwen-Image-2.1`) — 7B single-stream DiT (32 layers, block-causal attention) + Qwen3-VL 8B text/vision encoder + 64-channel RGBA VAE, via `QwenImage21Pipeline`.
-- **3-service stack:** Frontend (:5151) → Backend (:8181) → Qwen-Image Server (:30000)
-- **Removed:** Ollama service, Z.ai cloud service, model selector UI, AR sampling stage
-- **Multi-reference support:** Up to 10 reference images for I2I generation
-- **Hardware:** checked per host via `qwen_image_server/smoke_test.py`; no assumption carried over from the GLM-Image tri-GPU box
-- **Memory & Sharding:** `QWEN_MAX_MEMORY` (default `{"cpu": "8GiB"}`) drives accelerate's `device_map="balanced"`; `QWEN_CPU_OFFLOAD=1` switches to CPU offload for low-VRAM hosts; `QWEN_MAX_RESOLUTION` caps output (default 2048).
-- **Quantization:** none — bf16 weights. 8-bit via `PipelineQuantizationConfig` is not validated for this pipeline.
-- **Guidance:** Qwen-Image 2.1 samples without guidance by default. `true_cfg_scale > 1` activates CFG only together with a negative prompt, and doubles the work per step.
-- **Configurable generation params:** `num_inference_steps` (20-75, default 40), `true_cfg_scale` (1.0-3.0, default 1.0 = guidance off, needs a negative prompt), and resolution 1K/2K — exposed via the frontend settings modal
-- **torch.compile:** disabled in code to preserve VRAM for activations
-- **Optimizations:** VAE slicing + tiling, Flash SDP + mem-efficient SDP, prefix KV cache reuse, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128`
-- **Pre-flight checks:** Blackwell (sm_120) architecture validation, PCIe topology logging, per-GPU parameter distribution logging
-- **Est. VRAM peak:** measured per host with `qwen_image_server/smoke_test.py`; 1K fits comfortably on a single 24 GB GPU, 2K needs either more headroom or `QWEN_CPU_OFFLOAD=1`
-- **Inference server:** `qwen_image_server/main.py` — thread pool executor, inference lock, no idle unload
-- **Concurrency:** asyncio.Lock ensures 1 inference at a time; `run_in_executor` keeps event loop responsive
-- **Generation queue UX:** Loading screen is read-only and shows no prompt input; users click New Generation during active work to open one clean prompt input and submit additional backend-queued jobs. Completed current-user jobs automatically open their result canvas with latest-finished priority, including after refresh-time active job recovery.
-- **Global generation capacity:** Backend rejects new `/api/generate` requests with HTTP 429 when 10 active/accepted generation jobs are already in memory across all users.
-- **Active generations indicator:** Bottom-right floating pill (`ActiveGenerationsIndicator`) polls global active jobs for every user, shows all in-flight generations across users, includes multiple jobs per user and a `/10` global capacity count, and rehydrates the current user's active generation view after refresh. User's own entries are clickable to refocus the canvas; others are view-only. Queued jobs show `queued` instead of a running timer.
-- **Backend active tracking:** `GET /api/generations/active` returns in-memory tracked jobs with `queued` / `running` / `saving` status, elapsed time, inference step count, and reference image count. Generation elapsed time starts only after a job acquires the backend generation lock and begins the Qwen-Image request.
-- **Model status badge (segment-based):** 4-segment pipeline (Pre-flight → Weights → Optimize → Finalize) replaces circular progress ring. Segment progress persisted via `GET /v1/system/load/state` (Qwen-Image) → `GET /api/load/state` (backend proxy). Frontend recovers loading state on page refresh.
-- **Inference stage tracking:** `warmup → encoding → diffusion → decoding` — the diffusion stage is reported by the step callback. Qwen-Image 2.1 has no autoregressive stage, so `ar_sampling` is gone.
-- **Shared generation util:** `estimateTotalSeconds()` extracted to `frontend/src/lib/generation.ts` — used by both `GenerationStageBadge` and `GenerationTimeDisplay`.
-- **Configurable generation params:** `num_inference_steps` (20-75, default 40), `true_cfg_scale` (1.0-3.0, default 1.0 = guidance off, needs a negative prompt), and resolution 1K/2K — exposed via the frontend settings modal
-- **torch.compile:** disabled in code to preserve VRAM for activations
-- **Optimizations:** VAE slicing + tiling, Flash SDP + mem-efficient SDP, prefix KV cache reuse, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128`
-- **Pre-flight checks:** Blackwell (sm_120) architecture validation, PCIe topology logging, per-GPU parameter distribution logging
-- **Est. VRAM peak:** host-dependent; recorded after `qwen_image_server/smoke_test.py` runs on the target server and filled into the migration plan's calibration table
-- **Inference server:** `qwen_image_server/main.py` — thread pool executor, inference lock, no idle unload
-- **Concurrency:** asyncio.Lock ensures 1 inference at a time; `run_in_executor` keeps event loop responsive
+- **Single model:** Qwen-Image 2.1 (`Qwen/Qwen-Image-2.1`) — 7B single-stream DiT (32 layer, block-causal attention) + Qwen3-VL 8B text/vision encoder + 64-channel RGBA VAE.
+- **Engine: ComfyUI + ComfyUI-GGUF**, bukan diffusers. Kuantisasi **Q8_0** (7,07 GiB) + text encoder int8 (8,71 GiB) + VAE bf16 (0,63 GiB). Jalur diffusers sudah dicoba dan gagal di host ini: spill ke CPU memicu device mismatch di text encoder, 8-bit menaruh encoder di device `meta`, dan bf16 penuh OOM. ComfyUI berhasil karena *dynamic VRAM loading* memuat ketiga komponen bergantian, bukan bersamaan.
+- **Deployment: Docker Compose** (`deploy/docker/docker-compose.yml`) — 4 container: `comfyui`, `qwen-image` (facade), `backend`, `frontend`. Unit systemd lama sudah `disabled` tetapi masih terpasang sebagai rollback.
+- **Port:** frontend `5151` → backend `8281` → facade `30000` (internal saja) → comfyui `127.0.0.1:8188` (debug saja). **`8181` tidak dipakai** karena sudah terisi project lain di server.
+- **GPU:** dipin ke **device 1** lewat `runtime: nvidia` + `NVIDIA_VISIBLE_DEVICES=1`. GPU 0 sengaja tidak dipakai karena pernah lepas dari bus PCIe (Xid 79/154). Docker di server memakai CDI yang vendor spec-nya belum lengkap, jadi jalur `runtime:` dipilih agar tidak perlu restart daemon — restart akan mematikan seluruh container project lain di server itu.
+- **Batas resolusi:** `QWEN_MAX_RESOLUTION=1024`. 2K tidak muat: sisa VRAM hanya ~2,5 GiB sementara 2048² punya 4× token latent.
+- **Performa terukur (1K, 40 step):** T2I 32–34 s · CFG 2.0 63 s · I2I 1 referensi 50 s · I2I 3 referensi 84 s · VRAM puncak ~13,7 GB di **satu** kartu.
+- **Multi-reference:** sampai 10 gambar untuk I2I.
+- **Guidance:** default tanpa guidance. `true_cfg_scale > 1` hanya aktif bersama negative prompt, dan menggandakan waktu per step.
+- **Rendering teks:** penungkit terbesarnya **disiplin prompt** (teks persis dalam tanda kutip, pendek, tipografi + posisi eksplisit), bukan setting. 60 step justru memunculkan artefak. Batas kerasnya resolusi 1 MP — teks kecil akan selalu kabur, perlu overlay setelah generasi.
+- **Concurrency:** satu generasi pada satu waktu — backend (`_generation_lock`) → facade (`_inference_lock`) → satu proses ComfyUI. Kapasitas 10 job antre global (HTTP 429 bila penuh).
+- **Configurable generation params:** `num_inference_steps` (20-75, default 40), `true_cfg_scale` (1.0-3.0, default 1.0 = guidance off, butuh negative prompt) — lewat modal settings frontend. Selector resolusi sudah disembunyikan karena host ini 1K saja.
+- **Frontend:** input di bar bawah otomatis membawa prompt + gambar hasil sebagai referensi sehingga iterasi I2I jalan dari UI. Modal settings di-portal ke `document.body` karena `backdrop-filter` pada root-nya menjadikan elemen itu containing block untuk `position: fixed`.
+- **Docs deploy:** `deploy/docker/README.md` — operasional, struktur folder model, catatan GPU, dan cara rebuild per layanan.
 
 ### Key Files
 | File | Role |
 |------|------|
-| `qwen_image_server/main.py` | Inference server (T2I + I2I, thread pool, bf16, `device_map=balanced` or CPU offload) |
-| `qwen_image_server/smoke_test.py` | Standalone VRAM/timing check to run on any new host |
-| `backend/services/qwen_image_service.py` | Backend service layer (retry logic, 1hr timeout, load state proxy) |
+| `deploy/docker/docker-compose.yml` | Definisi 4 layanan, port, volume, dan pinning GPU |
+| `deploy/docker/README.md` | Operasional Docker: start/stop, log, rebuild per layanan, rollback |
+| `qwen_image_server/main.py` | Facade: mempertahankan kontrak API lama, menerjemahkan request jadi graph ComfyUI |
+| `qwen_image_server/comfy_client.py` | Klien HTTP + WebSocket ke ComfyUI (submit, progres, ambil hasil, upload referensi) |
+| `qwen_image_server/workflows.py` | Penyusun graph API-format untuk T2I dan I2I (1-10 referensi) |
+| `qwen_image_server/smoke_test.py` | Uji VRAM/timing untuk host baru (jalur diffusers, disimpan sebagai rujukan) |
+| `backend/services/qwen_image_service.py` | Klien backend → facade (retry, auto-load, timeout 1 jam, penerusan pesan error) |
 | `backend/config.py` | `QWEN_IMAGE_API_URL` (default localhost:30000), `QWEN_DEFAULT_RESOLUTION` |
-| `start-app.sh` | Starts all 3 services (exports `PYTORCH_CUDA_ALLOC_CONF`) |
+| `start-app.sh` | Menjalankan stack Docker (bukan lagi menyalakan service sendiri) |
 
 
 =====================
@@ -61,9 +50,17 @@ MaPic/
 ├── API.md                             # API documentation
 ├── README.md                          # Human-facing project overview
 ├── CLAUDE.md                          # Claude-specific instructions
-├── start-app.sh                       # Orchestrates all 3 services (Frontend + Backend + Qwen-Image Server)
+├── start-app.sh                       # Menjalankan stack Docker (delegasi ke deploy/docker)
 │
-├── backend/                           # FastAPI Backend (:8181)
+├── deploy/docker/                     # Deployment Docker (menggantikan systemd)
+│   ├── docker-compose.yml             # 4 layanan: comfyui, qwen-image, backend, frontend
+│   ├── comfyui/                       # Dockerfile engine + extra_model_paths.yaml
+│   ├── qwen-image/                    # Dockerfile facade (tanpa torch, image kecil)
+│   ├── backend/                       # Dockerfile API produk
+│   ├── frontend/                      # Dockerfile multi-stage vite → nginx + nginx.conf
+│   └── README.md                      # Operasional, struktur folder model, catatan GPU
+│
+├── backend/                           # FastAPI Backend (:8281 di host, :8000 di container)
 │   ├── main.py                        # FastAPI app — API routes (/api/health, /api/generate, /api/history, etc.)
 │   ├── schemas.py                     # Pydantic models — GenerateRequest, Generation
 │   ├── config.py                      # Environment config loader (Supabase, CORS, QWEN_IMAGE_API_URL)
@@ -102,21 +99,25 @@ MaPic/
 │           ├── supabase.ts            # Supabase JS client initialization (auth + DB)
 │           └── utils.ts               # Utility helpers (cn — clsx + tailwind-merge)
 │
-├── qwen_image_server/                 # Local AI Inference Server (:30000)
-│   ├── main.py                        # FastAPI server wrapping QwenImage21Pipeline — T2I, I2I, load/unload, SSE progress
-│   ├── smoke_test.py                  # Standalone VRAM/timing check for a new host
-│   └── requirements.txt               # PyTorch (cu128), diffusers (git main), transformers >= 5.17, accelerate, fastapi
+├── qwen_image_server/                 # Facade inference (:30000, internal di Docker)
+│   ├── main.py                        # FastAPI facade — mempertahankan kontrak API lama, menerjemahkan ke graph ComfyUI
+│   ├── comfy_client.py                # Klien HTTP + WebSocket ke ComfyUI (submit, progres per node, ambil hasil)
+│   ├── workflows.py                   # Penyusun graph API-format: T2I dan I2I (1-10 referensi)
+│   ├── smoke_test.py                  # Uji VRAM/timing untuk host baru
+│   ├── requirements-facade.txt        # Deps facade untuk image Docker (tanpa torch)
+│   └── requirements.txt               # Deps jalur diffusers (disimpan sebagai rujukan)
 │
 └── test/                              # Screenshots & test images
 ```
 
 ### Data Flow
-1. **User** → Frontend (`:5151`) submits prompt (+ optional reference images)
-2. **Frontend** → Backend (`:8181`) `POST /api/generate` with prompt + base64 images
-3. **Backend** → Qwen-Image Server (`:30000`) `POST /v1/images/generations` or `/v1/images/edits`
-4. **Qwen-Image Server** runs `QwenImage21Pipeline` inference (bf16, `device_map=balanced` or CPU offload)
-5. **Backend** receives base64 image → uploads to Supabase Storage → inserts record to PostgreSQL → returns Generation to Frontend
-6. **Frontend** displays image and updates history sidebar
+1. **User** → Frontend (`:5151`, nginx) mengirim prompt (+ gambar referensi opsional)
+2. **Frontend** → Backend (`:8281`) `POST /api/generate` dengan prompt + gambar base64
+3. **Backend** → facade (`:30000`) `POST /v1/images/generations` atau `/v1/images/edits`
+4. **Facade** menyusun graph ComfyUI (node GGUF + CLIP + VAE + sampler) lalu mengirim ke `comfyui:8188` lewat network internal Docker
+5. **ComfyUI** menjalankan Qwen-Image 2.1 GGUF di GPU 1 dengan dynamic VRAM loading
+6. **Backend** menerima PNG → upload ke Supabase Storage → insert record → mengembalikan `Generation`
+7. **Frontend** menampilkan gambar dan memperbarui riwayat
 
 
 =====================

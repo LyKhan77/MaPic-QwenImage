@@ -2,15 +2,14 @@
 
 **Developed by Lee Khan** | *Synthesizing the Future*
 
-MaPic turns text prompts and reference images into production-quality visuals with local Qwen-Image 2.1 inference. The production frontend is deployed on Vercel, while the backend and GPU inference stack run on local hardware and are exposed to the frontend through Cloudflare Tunnel.
+MaPic turns text prompts and reference images into production-quality visuals with local Qwen-Image 2.1 inference. Seluruh stack berjalan di satu server kantor sebagai container Docker, jadi tidak ada biaya API, tidak ada rate limit, dan tidak ada trafik keluar jaringan.
 
 ## 🚀 Features
 
-*   **AI Image Generation:** Generate images with Qwen-Image 2.1 (7B single-stream DiT + Qwen3-VL encoder) using a local diffusers pipeline.
+*   **AI Image Generation:** Generate images with Qwen-Image 2.1 (7B single-stream DiT + Qwen3-VL encoder) via ComfyUI + GGUF Q8_0.
 *   **Multi-Reference Support:** Attach up to 10 reference images for image-to-image generation, style transfer, editing, and identity-preserving workflows.
-*   **Native 2K & Transparent Output:** Pick 1K or 2K output, and generate RGBA images with a transparent background.
-*   **Production Frontend on Vercel:** React SPA is served from `https://mapic-glm.vercel.app`.
-*   **Cloudflare Tunnel Backend Access:** Vercel frontend communicates with the local backend through a public tunnel URL.
+*   **Transparent Output:** Menghasilkan RGBA dengan latar transparan. Output dikunci di **1K (1024×1024)** — 2K tidak muat di VRAM 16 GB.
+*   **Berjalan di jaringan kantor:** Frontend, backend, dan inference semuanya container Docker di satu server. Tidak ada dependensi ke Vercel atau tunnel.
 *   **Local GPU Inference:** The Qwen-Image 2.1 server runs locally on CUDA GPUs with no cloud inference cost or rate limit.
 *   **Model Load Controls:** The UI can load and unload the model. The inference server also unloads from VRAM after 1 hour of inactivity.
 *   **Generation Queue:** Users can submit another prompt while a generation is active by clicking **New Generation**. The active loading view stays read-only.
@@ -23,45 +22,34 @@ MaPic turns text prompts and reference images into production-quality visuals wi
 
 ## 🏗️ Architecture
 
-### Production Flow
+### Alur (semua di jaringan kantor, di dalam Docker)
 
 ```
-User Browser
+Browser kantor
     |
-    +--> Vercel CDN (https://mapic-glm.vercel.app)
-    |       Serves React SPA
-    |
-    +--> Cloudflare Edge --> Named Tunnel --> Local Backend :8181
-            (https://api.mapic-backend.site)
-                                              |
-                                              +--> Qwen-Image Server :30000
-                                                     |
-                                                     +--> diffusers QwenImage21Pipeline
-```
-
-### Local Development Flow
-
-```
-Frontend (React/Vite :5151)
-    |
-    +--> MaPic Backend (FastAPI :8181)
+    +--> frontend :5151   (nginx, React SPA)
             |
-            +--> Qwen-Image Server (FastAPI :30000)
+            +--> backend :8281   (FastAPI — auth, riwayat, Supabase)
                     |
-                    +--> Qwen-Image 2.1 local pipeline
+                    +--> qwen-image :30000   (facade, internal saja)
+                            |
+                            +--> comfyui :8188   (engine, GPU 1)
+                                    |
+                                    +--> GGUF Q8_0 di /models (mount read-only)
 ```
 
-## 🌐 Current Deployment
+## 🌐 Deployment Saat Ini
 
-| Service | URL | Notes |
-|---------|-----|-------|
-| Frontend | `https://mapic-glm.vercel.app` | Vercel production app |
-| Backend tunnel | `https://api.mapic-backend.site` | Named tunnel — permanent URL |
-| Backend health | `https://api.mapic-backend.site/api/health` | Public health check through tunnel |
-| Backend local | `http://localhost:8181/api/health` | Local backend health check |
-| Qwen-Image local | `http://localhost:30000/health` | Local inference server health check |
+Berjalan sepenuhnya di jaringan kantor, sebagai container Docker di `gspe-ai2`:
 
-For Vercel and Cloudflare Tunnel troubleshooting, see [vercel-docs.md](vercel-docs.md).
+| Layanan | Alamat | Catatan |
+|---------|--------|---------|
+| Frontend | `http://192.168.2.142:5151` | nginx di container |
+| Backend | `http://192.168.2.142:8281/api` | API yang dipanggil browser |
+| Backend health | `http://192.168.2.142:8281/api/health` | Status rantai ke facade |
+| ComfyUI | `127.0.0.1:8188` | Debug saja; dari komputer lain pakai SSH tunnel |
+
+Vercel dan Cloudflare Tunnel **tidak lagi dipakai**. Bagian di bawah disimpan hanya sebagai rujukan historis bila nanti ingin mengekspos ke publik lagi — dan perlu diingat halaman HTTPS tidak bisa memanggil backend HTTP (mixed content), jadi tunnel/HTTPS tetap diperlukan untuk itu.
 
 ## 🛠️ Tech Stack
 
@@ -77,16 +65,17 @@ For Vercel and Cloudflare Tunnel troubleshooting, see [vercel-docs.md](vercel-do
 ### Backend
 *   **Framework:** Python FastAPI
 *   **Database & Storage:** Supabase PostgreSQL + Storage
-*   **Tunnel:** Cloudflare Tunnel to local `:8181`
+*   **Tunnel:** Cloudflare Tunnel to local `:8281`
 *   **AI Service Client:** HTTP client to the Qwen-Image 2.1 server
 
 ### Inference Server
-*   **Framework:** Python FastAPI + Uvicorn
-*   **Model:** Qwen-Image 2.1 (`Qwen/Qwen-Image-2.1`, 7B single-stream DiT + Qwen3-VL 8B encoder + 64-channel RGBA VAE)
-*   **Runtime:** PyTorch (CUDA 12.8), diffusers `QwenImage21Pipeline` (git main), transformers >= 5.17
-*   **Hardware Target:** Multi-GPU NVIDIA; set `QWEN_MAX_MEMORY` per host, or `QWEN_CPU_OFFLOAD=1` for limited VRAM
-*   **Optimizations:** Balanced device map, explicit `MAX_MEMORY`, VAE slicing/tiling, Flash SDP, memory-efficient SDP, prefix KV cache reuse
-*   **Note:** `torch.compile` is currently disabled in code to preserve VRAM for activations.
+*   **Framework:** ComfyUI + ComfyUI-GGUF (bukan diffusers — lihat `deploy/docker/README.md` untuk alasannya)
+*   **Model:** Qwen-Image 2.1 (`Qwen/Qwen-Image-2.1`) — 7B single-stream DiT + Qwen3-VL 8B encoder + 64-channel RGBA VAE
+*   **Kuantisasi:** GGUF **Q8_0** (7,07 GiB) + text encoder int8 (8,71 GiB) + VAE bf16 (0,63 GiB)
+*   **Runtime:** PyTorch 2.11 (CUDA 13.0), transformers 5.17, ComfyUI dengan `--lowvram`
+*   **Hardware:** satu RTX 5080 16 GB cukup untuk 1K (VRAM puncak ~13,7 GB). GPU dipin lewat `NVIDIA_VISIBLE_DEVICES`.
+*   **Batas:** `QWEN_MAX_RESOLUTION=1024`. 2K tidak muat — ruang sisa hanya ~2,5 GiB.
+*   **Performa terukur (1K, 40 step):** T2I 32–34 s · CFG 2.0 63 s · I2I 1 referensi 50 s · I2I 3 referensi 84 s
 
 ## 📦 Installation & Setup
 
@@ -105,85 +94,66 @@ git clone git@github.com:LyKhan77/MaPic-QwenImage.git
 cd MaPic-QwenImage
 ```
 
-### 2. Qwen-Image 2.1 Server Setup
+### 2. Menjalankan stack (Docker)
+
+Seluruh stack — ComfyUI, facade, backend, dan frontend — berjalan sebagai container:
 
 ```bash
-cd qwen_image_server
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+cd deploy/docker
+cp .env.example .env     # isi VITE_API_URL, SUPABASE_URL, SUPABASE_ANON_KEY
+nano .env
+docker compose up -d --build
+docker compose ps
 ```
 
-Start the server:
+Bobot model **tidak** ikut ke dalam image: unduh ke `~/apps/qwen21-gguf`, lalu folder itu di-mount read-only. Tata letak folder yang diharapkan dan perintah operasional lainnya ada di [`deploy/docker/README.md`](deploy/docker/README.md).
 
-```bash
-python -m uvicorn main:app --host 0.0.0.0 --port 30000
-```
+### 3. Backend — rahasia runtime
 
-The first model load downloads Qwen-Image 2.1 weights from Hugging Face (~47 GB). Before deploying on a new host, run `python smoke_test.py --resolution 2048` to measure peak VRAM and generation time for that machine.
-
-### 3. Backend Setup
-
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-Create `backend/.env`:
+`backend/.env` dibaca saat container jalan (lewat `env_file`):
 
 ```env
 SUPABASE_URL="https://your-project.supabase.co"
 SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
-QWEN_IMAGE_API_URL="http://localhost:30000"
-QWEN_DEFAULT_RESOLUTION="2048"
-CORS_ORIGINS="http://localhost:5151,http://localhost:5152,https://mapic-glm.vercel.app"
+QWEN_DEFAULT_RESOLUTION="1024"
+CORS_ORIGINS="http://localhost:5151,http://192.168.2.142:5151"
 ```
 
-Start the backend:
+`QWEN_IMAGE_API_URL` tidak perlu diisi manual — compose menetapkannya ke `http://qwen-image:30000` di network internal.
 
-```bash
-python -m uvicorn main:app --host 0.0.0.0 --port 8181 --reload
-```
+### 4. Frontend — nilai build-time
 
-### 4. Frontend Setup
-
-```bash
-cd frontend
-npm install
-```
-
-Create `frontend/.env` for local development:
+`deploy/docker/.env` berisi nilai yang ditanam Vite saat build:
 
 ```env
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
-VITE_API_URL=http://localhost:8181/api
+VITE_API_URL=http://192.168.2.142:8281/api
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
 ```
 
-Run locally:
+Kalau IP server berubah, ubah di sini lalu rebuild **hanya** layanan frontend:
 
 ```bash
-npm run dev
+docker compose build frontend && docker compose up -d frontend
 ```
 
-Local URLs:
-*   Frontend: `http://localhost:5151`
-*   Backend: `http://localhost:8181`
-*   Qwen-Image Server: `http://localhost:30000`
+### 5. Alamat
 
-### 5. Start All Local Services
+Semua diakses dari jaringan kantor:
 
-From project root:
+*   Frontend: `http://192.168.2.142:5151`
+*   Backend: `http://192.168.2.142:8281/api`
+*   ComfyUI (debug): SSH tunnel ke `127.0.0.1:8188`
+
+Untuk mode pengembangan frontend (hot reload), jalankan terpisah di port berbeda — jangan bersamaan dengan container frontend:
 
 ```bash
-bash start-app.sh
+cd frontend && VITE_API_URL=http://localhost:8281/api npm run dev -- --port 5152
 ```
 
-This starts the Qwen-Image 2.1 server, backend, and local Vite frontend. In production, the frontend is served by Vercel, so the local Vite frontend is optional.
+## 🚢 (Historis) Production Frontend + Tunnel
 
-## 🚢 Production Frontend + Tunnel
+> Sejak 2026-09-23 MaPic berjalan penuh di jaringan kantor lewat Docker. Vercel dan Cloudflare Tunnel tidak dipakai lagi; bab ini disimpan sebagai rujukan bila nanti ingin mengekspos ke publik lagi.
 
 ### Vercel Environment Variables
 
@@ -221,7 +191,7 @@ The frontend is a static React SPA. `frontend/vercel.json` rewrites all routes t
 curl -s http://localhost:30000/health
 
 # Backend local
-curl -s http://localhost:8181/api/health
+curl -s http://localhost:8281/api/health
 
 # Backend through tunnel
 curl -s https://api.mapic-backend.site/api/health
@@ -238,7 +208,7 @@ curl -s https://api.mapic-backend.site/openapi.json \
 2.  Login with Google through Supabase Auth.
 3.  Type a prompt in the bottom prompt input.
 4.  Optionally attach up to 10 reference images.
-5.  Adjust inference steps, True CFG scale with a negative prompt, or the 1K/2K resolution if needed.
+5.  Adjust inference steps, or True CFG scale with a negative prompt, if needed. Resolusi terkunci di 1K.
 6.  Click **Generate** or press Enter.
 7.  During generation, the loading view is read-only. Use **New Generation** to open a clean prompt and submit another request while the current job continues.
 8.  Track queued/running/saving jobs in the active generation indicator, or click your active job to refocus the loader.
@@ -254,9 +224,9 @@ Common checks:
 
 *   If the frontend shows offline, verify the tunnel is running and `VITE_API_URL` points to the current tunnel URL.
 *   If browser console shows CORS errors, confirm backend `CORS_ORIGINS` includes `https://mapic-glm.vercel.app`.
-*   If the tunnel reaches the wrong app, check `~/.cloudflared/config.yml` and confirm ingress points to `http://localhost:8181`.
+*   If the tunnel reaches the wrong app, check `~/.cloudflared/config.yml` and confirm ingress points to `http://localhost:8281`.
 *   If Supabase login fails on Vercel, confirm Vercel env vars and Supabase redirect URLs include `https://mapic-glm.vercel.app`.
-*   If model status is offline, check both `http://localhost:30000/health` and `http://localhost:8181/api/health`.
+*   If model status is offline, check both `http://localhost:30000/health` and `http://localhost:8281/api/health`.
 
 ## ⚡ Creator
 
