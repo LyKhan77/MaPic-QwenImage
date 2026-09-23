@@ -60,7 +60,7 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-background p-4 relative overflow-hidden">
+    <div className="flex min-h-dvh w-full items-center justify-center bg-background p-4 relative overflow-hidden">
       {/* Decorative Elements */}
       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50" />
       <div className="absolute bottom-0 right-0 w-full h-1 bg-gradient-to-r from-transparent via-secondary to-transparent opacity-50" />
@@ -131,7 +131,7 @@ export default function Login() {
             <div className="flex justify-between items-center">
               <label className="text-xs font-mono uppercase text-muted-foreground ml-1">Password</label>
               {!isSignUp && (
-                <button type="button" className="text-[10px] font-mono uppercase text-primary/60 hover:text-primary transition-colors">
+                <button type="button" className="relative text-[10px] font-mono uppercase text-primary/60 hover:text-primary transition-colors after:absolute after:-inset-x-2 after:-inset-y-4 after:content-[''] lg:after:hidden">
                   Forgot?
                 </button>
               )}
@@ -156,7 +156,7 @@ export default function Login() {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-white transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-3 text-muted-foreground hover:text-white transition-colors"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -185,7 +185,7 @@ export default function Login() {
               setIsSignUp(!isSignUp)
               setAuthError(null)
             }}
-            className="text-[10px] font-mono uppercase text-muted-foreground hover:text-primary transition-colors"
+            className="relative text-[10px] font-mono uppercase text-muted-foreground hover:text-primary transition-colors after:absolute after:-inset-x-2 after:-inset-y-4 after:content-[''] lg:after:hidden"
           >
             {isSignUp ? 'Already have access? Establishment Link' : 'Need new credentials? Create Account'}
           </button>

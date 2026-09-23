@@ -72,7 +72,7 @@ export default function ImageCanvas({ currentGeneration, isLoading, modelStatus,
   }
 
   return (
-    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-background p-8 transition-colors">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-background p-3 transition-colors md:p-8">
       {/* Grid Background */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,hsl(var(--muted))_1px,transparent_1px),linear-gradient(to_bottom,hsl(var(--muted))_1px,transparent_1px)] bg-[size:24px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] opacity-20" />
       
@@ -154,20 +154,20 @@ export default function ImageCanvas({ currentGeneration, isLoading, modelStatus,
               />
               
               {/* Overlay Actions */}
-              <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between bg-black/60 p-4 backdrop-blur-md transition-transform translate-y-full group-hover:translate-y-0">
+              <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between bg-black/60 p-4 backdrop-blur-md transition-transform translate-y-0 md:translate-y-full md:group-hover:translate-y-0">
                 <p className="max-w-[70%] truncate text-xs font-mono text-gray-300">
                   {currentGeneration.prompt}
                 </p>
                 <div className="flex gap-2">
                   <button 
                     onClick={handleDownload}
-                    className="rounded-full bg-white/10 p-2 hover:bg-primary hover:text-black transition-colors"
+                    className="rounded-full bg-white/10 p-3 md:p-2 hover:bg-primary hover:text-black transition-colors"
                   >
                     <Download size={16} />
                   </button>
                   <button 
                     onClick={handleShare}
-                    className="rounded-full bg-white/10 p-2 hover:bg-secondary hover:text-white transition-colors"
+                    className="rounded-full bg-white/10 p-3 md:p-2 hover:bg-secondary hover:text-white transition-colors"
                     title="Copy Image"
                   >
                     <Copy size={16} />
@@ -180,7 +180,7 @@ export default function ImageCanvas({ currentGeneration, isLoading, modelStatus,
               key="empty"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex flex-col items-center justify-start pt-20 w-full max-w-4xl space-y-8 h-full"
+              className="flex flex-col items-center justify-start pt-28 md:pt-20 w-full max-w-4xl space-y-8 h-full"
             >
                <div className="flex flex-col items-center">
                  <div className="-mb-10">

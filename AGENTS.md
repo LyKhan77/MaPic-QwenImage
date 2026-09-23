@@ -24,6 +24,7 @@ project references :
 - **Concurrency:** satu generasi pada satu waktu — backend (`_generation_lock`) → facade (`_inference_lock`) → satu proses ComfyUI. Kapasitas 10 job antre global (HTTP 429 bila penuh).
 - **Configurable generation params:** `num_inference_steps` (20-75, default 40), `true_cfg_scale` (1.0-3.0, default 1.0 = guidance off, butuh negative prompt) — lewat modal settings frontend. Selector resolusi sudah disembunyikan karena host ini 1K saja.
 - **Frontend:** input di bar bawah otomatis membawa prompt + gambar hasil sebagai referensi sehingga iterasi I2I jalan dari UI. Modal settings di-portal ke `document.body` karena `backdrop-filter` pada root-nya menjadikan elemen itu containing block untuk `position: fixed`.
+- **Responsif mobile (2026-09-23):** di bawah 768px sidebar jadi **overlay drawer** (280px, slide-in) dengan backdrop tap-to-close, dibuka lewat tombol hamburger 44×44 di kiri atas — rail collapsed 80px kini khusus desktop. Sebelumnya sidebar 256px di layar 390px menyisakan `main` 134px dan tombol settings/send keluar viewport, sementara toggle untuk menutupnya tertimpa badge status: app buntu. Badge status dipindah ke `top-16` di mobile dan label "Model" + bar progres disembunyikan di bawah `sm` sehingga lebarnya 325px → 163px (di viewport 320px dulu terpotong 21px). `h-screen` → `h-dvh` di Dashboard/Login dan `100vh` → `100dvh` di `index.css`, plus `viewport-fit=cover` + `env(safe-area-inset-bottom)` pada prompt bar. Target sentuh ≥44px berlaku sampai breakpoint `lg` (tablet dianggap perangkat sentuh). Kontrol yang dulu hover-only sekarang terlihat di mobile: aksi unduh/salin pada overlay gambar, tombol hapus di riwayat, dan panel daftar generasi aktif (sekarang bisa di-tap, bukan hanya hover). Tombol Load/Unload model **tetap** hover-only di mobile — backend auto-load saat generate, dan menampilkannya akan melebarkan badge melampaui viewport 390px. Bukti: `temp/mobile-audit-2026-09-23/`, rancangan: `docs/superpowers/plans/2026-09-23-responsif-mobile.md`.
 - **Docs deploy:** `deploy/docker/README.md` — operasional, struktur folder model, catatan GPU, dan cara rebuild per layanan.
 - **Jalur publik ditutup (2026-09-23):** project Vercel lama dihapus, `frontend/vercel.json` dan endpoint `/api/tunnel-status` ikut dibuang. Tidak ada titik masuk dari luar jaringan kantor; akses hanya `http://192.168.2.142:5151`. Mengembalikannya menuntut HTTPS di backend juga, karena browser memblokir halaman HTTPS yang memanggil backend HTTP.
 - **Auth API (2026-09-23):** semua endpoint backend kecuali `GET /api/health` menuntut `Authorization: Bearer <access token Supabase>`. Backend memverifikasi tanda tangan lewat JWKS project (ES256) dengan dependency `require_user` (`backend/auth.py`) dan memakai claim `sub` sebagai identitas — `user_id` dari body/URL tidak lagi dipercaya (`user_id` dihapus dari `GenerateRequest`, riwayat & hapus dibatasi ke pemilik token). Endpoint `/api/load/stream` (SSE) dihapus karena `EventSource` tidak bisa mengirim header; progres load dibaca lewat `GET /api/load/state`. Login UI: email + password, Google dinonaktifkan.
@@ -54,6 +55,7 @@ MaPic/
 ├── API.md                             # API documentation
 ├── database-schema.md                 # Skema Supabase (diverifikasi lewat introspeksi live)
 ├── README.md                          # Human-facing project overview
+├── CHANGELOG.md                       # Catatan perubahan per perubahan (konteks, berkas, bukti, rollback)
 ├── CLAUDE.md                          # Claude-specific instructions
 ├── start-app.sh                       # Menjalankan stack Docker (delegasi ke deploy/docker)
 │
@@ -91,7 +93,7 @@ MaPic/
 │       ├── components/
 │       │   ├── ImageCanvas.tsx        # Displays generated image, download & copy actions
 │       │   ├── PromptInput.tsx        # Prompt textarea + reference image upload (up to 10 images)
-│       │   ├── Sidebar.tsx            # Collapsible sidebar — history list, new chat, theme toggle, logout
+│       │   ├── Sidebar.tsx            # Sidebar: overlay drawer + backdrop di <768px, rail collapsible di desktop — history, new chat, logout
 │       │   ├── ModelStatusBadge.tsx   # Shows model load/unload/ready status with load/unload actions
 │       │   ├── GenerationStageBadge.tsx # Real-time generation stage list (top-right)
 │       │   ├── GenerationTimeDisplay.tsx # Estimasi waktu proses dari stage + step saat ini

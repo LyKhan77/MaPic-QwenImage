@@ -48,11 +48,12 @@ export default function ModelStatusBadge({
       )}
 
       {/* Label */}
-      <span className="text-[10px] tracking-widest text-white/35 uppercase">
+      <span className="hidden text-[10px] tracking-widest text-white/35 uppercase sm:inline">
         Model
       </span>
 
-      {/* Bar */}
+      {/* Bar — display:contents at sm+ so it stays a direct flex child; hidden below */}
+      <span className="hidden sm:contents">
       {isOffline || isError ? (
         <div className="h-1.5 w-[6.5rem] rounded-full bg-red-400/15 border border-red-400/50" />
       ) : isLoading ? (
@@ -71,6 +72,7 @@ export default function ModelStatusBadge({
       ) : (
         <div className="h-1.5 w-[6.5rem] rounded-full border border-white/[0.06]" />
       )}
+      </span>
 
       {/* Status label */}
       <AnimatePresence mode="wait">
@@ -103,14 +105,16 @@ export default function ModelStatusBadge({
         <button
           onClick={onLoad}
           title="Retry loading model"
-          className="ml-2 flex items-center gap-1 text-[10px] text-red-400/50 hover:text-red-400 transition-colors"
+          className="relative ml-2 flex items-center gap-1 text-[10px] text-red-400/50 hover:text-red-400 transition-colors after:absolute after:-inset-x-2 after:-inset-y-4 after:content-[''] lg:after:hidden"
         >
           <RefreshCw size={11} />
           <span className="font-bold uppercase">Retry</span>
         </button>
       )}
 
-      {/* Unload button (ready, hover reveal) */}
+      {/* Unload button (ready, hover reveal).
+          ponytail: hover-only on mobile too — the backend auto-loads on demand, so this stays a
+          desktop convenience instead of widening the badge past the 390px viewport. */}
       {isReady && onUnload && (
         <button
           onClick={onUnload}

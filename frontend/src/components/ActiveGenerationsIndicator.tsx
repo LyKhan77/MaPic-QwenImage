@@ -51,16 +51,16 @@ export default function ActiveGenerationsIndicator({
   const otherGens = displayedGenerations.filter(g => g.user_id !== currentUserId)
 
   return (
-    <div
-      className="fixed bottom-4 right-4 z-50"
+    <div className="fixed bottom-24 right-4 z-50 md:bottom-4"
       onMouseEnter={showHoverPanel}
       onMouseLeave={hideHoverPanel}
+      onClick={() => setIsHovered(v => !v)}
     >
       {/* Collapsed pill */}
       <motion.div
         layout
         className={cn(
-          "flex items-center gap-2 rounded-full border border-border/50 bg-card/60 backdrop-blur-md px-3 py-1.5 shadow-lg cursor-default select-none",
+          "flex items-center gap-2 rounded-full border border-border/50 bg-card/60 backdrop-blur-md px-3 py-1.5 shadow-lg cursor-pointer select-none",
           isHovered && "bg-card/80"
         )}
       >

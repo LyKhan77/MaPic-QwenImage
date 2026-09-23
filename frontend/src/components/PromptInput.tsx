@@ -144,7 +144,7 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
   }
 
   return (
-    <div className={`w-full transition-all duration-500 ${isCentralized ? '' : 'border-t border-border bg-card/40 backdrop-blur-md p-6'}`}>
+    <div className={`w-full transition-all duration-500 ${isCentralized ? '' : 'border-t border-border bg-card/40 backdrop-blur-md p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:p-6'}`}>
       <div className={`mx-auto w-full relative space-y-2 ${isCentralized ? 'max-w-2xl' : 'max-w-4xl'}`}>
 
         {!isCentralized && (!isModelReady || isModelUnloaded) && (
@@ -158,7 +158,7 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
         )}
 
         {!isCentralized && (
-            <div className="flex items-center justify-end px-1">
+            <div className="hidden items-center justify-end px-1 md:flex">
                 <span className="text-[10px] text-muted-foreground font-mono">ENTER to send</span>
             </div>
         )}
@@ -175,7 +175,7 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
           <button
              onClick={() => fileInputRef.current?.click()}
              disabled={images.length >= 10 || !isModelReady}
-             className={`flex shrink-0 items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-10 w-10 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-2 text-muted-foreground hover:text-foreground'}`}
+             className={`flex shrink-0 items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-11 w-11 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-3 lg:p-2 text-muted-foreground hover:text-foreground'}`}
              title="Attach reference image (Max 10, 2MB each)"
           >
              <Paperclip size={isCentralized ? 18 : 20} />
@@ -189,13 +189,14 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
             onBlur={() => onTyping && onTyping(false)}
             placeholder={isCentralized ? "How can MaPic help you today?" : `Describe your imagination...`}
             disabled={!isModelReady}
-            className={`flex-1 bg-transparent px-2 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50 ${isCentralized ? 'text-lg py-3 px-4' : ''}`}
+            enterKeyHint="send"
+            className={`min-w-0 flex-1 bg-transparent px-2 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50 ${isCentralized ? 'text-base py-3 px-4 md:text-lg' : ''}`}
           />
 
           <button
             onClick={() => setShowSettings(!showSettings)}
             disabled={!isModelReady}
-            className={`shrink-0 flex items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-10 w-10 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-2 text-muted-foreground hover:text-foreground'} ${showSettings ? 'text-primary' : ''}`}
+            className={`shrink-0 flex items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-11 w-11 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-3 lg:p-2 text-muted-foreground hover:text-foreground'} ${showSettings ? 'text-primary' : ''}`}
             title="Generation settings"
           >
             <Settings2 size={isCentralized ? 18 : 20} />
@@ -204,12 +205,12 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
           <button
             onClick={handleSubmit}
             disabled={!prompt.trim() || !isModelReady}
-            className={`group shrink-0 flex items-center justify-center transition-all ${isCentralized ? 'h-10 w-10 rounded-full bg-white text-black hover:bg-primary disabled:bg-gray-600' : 'rounded-lg bg-foreground px-4 py-2 text-sm font-bold text-background hover:bg-primary hover:text-primary-foreground'}`}
+            className={`group shrink-0 flex items-center justify-center transition-all ${isCentralized ? 'h-11 w-11 rounded-full bg-white text-black hover:bg-primary disabled:bg-gray-600' : 'min-h-11 rounded-lg bg-foreground px-4 py-2 text-sm font-bold text-background hover:bg-primary hover:text-primary-foreground'}`}
           >
             {isCentralized ? <Send size={18} /> : (
                 <>
-                    <span>{isLoading ? `QUEUE (${queueLength + 1})` : 'GENERATE'}</span>
-                    <Send size={14} className="ml-2 transition-transform group-hover:translate-x-1" />
+                    <span className="hidden sm:inline">{isLoading ? `QUEUE (${queueLength + 1})` : 'GENERATE'}</span>
+                    <Send size={14} className="sm:ml-2 transition-transform group-hover:translate-x-1" />
                 </>
             )}
           </button>

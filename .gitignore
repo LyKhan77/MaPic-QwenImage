@@ -49,3 +49,6 @@ models/
 # Unit systemd host-specific (dibuat di server, bukan di repo)
 deploy/*.service
 qwen-image.service
+
+# Playwright MCP artifacts (screenshots, console logs, snapshots)
+.playwright-mcp/
