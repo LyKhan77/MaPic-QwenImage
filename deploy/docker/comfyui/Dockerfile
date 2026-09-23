@@ -20,6 +20,16 @@ RUN git clone https://github.com/comfyanonymous/ComfyUI.git /opt/ComfyUI \
     && git -C /opt/ComfyUI/custom_nodes/ComfyUI-GGUF checkout ${GGUF_NODE_COMMIT}
 
 WORKDIR /opt/ComfyUI
+
+# Base image memakai Python sistem dengan penanda PEP 668 (externally managed),
+# sehingga pip menolak memasang ke sistem. Venv dengan --system-site-packages
+# memakai torch bawaan image tetapi tetap bisa memasang dependensi ComfyUI.
+ENV VIRTUAL_ENV=/opt/venv
+RUN python -m venv --system-site-packages ${VIRTUAL_ENV}
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+
+RUN python -c "import torch; print('torch dari base image:', torch.__version__)"
+
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt && pip install gguf
 

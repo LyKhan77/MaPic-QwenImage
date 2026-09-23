@@ -89,14 +89,22 @@ ssh -L 8188:127.0.0.1:8188 gspe-ai2@192.168.2.142
 
 ## Catatan GPU
 
-`comfyui` dipin ke **GPU 1** lewat `deploy.resources.reservations.devices`. GPU 0 tidak dipakai karena pernah lepas dari bus PCIe (Xid 79/154).
+`comfyui` dipin ke **GPU 1** lewat `runtime: nvidia` + `NVIDIA_VISIBLE_DEVICES=1`. GPU 0 tidak dipakai karena pernah lepas dari bus PCIe (Xid 79/154).
 
-Bila compose di host ini mengabaikan blok `deploy`, ganti dengan cara runtime:
+Jalur runtime dipilih karena Docker di host ini memakai CDI untuk `--gpus` dan vendor spec-nya belum lengkap, sementara `daemon.json` sudah memuat entri runtime `nvidia` sehingga jalur ini langsung bekerja.
+
+> **Jangan me-restart daemon Docker** untuk memperbaikinya. `live-restore` tidak aktif di `daemon.json`, jadi restart akan menghentikan seluruh ~115 container milik project lain di server ini.
+
+Kalau nanti CDI diperbaiki (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`), bentuk berikut bisa dipakai sebagai gantinya:
 
 ```yaml
-    runtime: nvidia
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
 ```
 
 Verifikasi cepat bahwa container benar-benar melihat GPU:

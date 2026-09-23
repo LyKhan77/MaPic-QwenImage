@@ -27,14 +27,15 @@ services:
       # Hanya localhost — untuk debugging UI graph lewat SSH tunnel.
       # Layanan lain menjangkaunya lewat network internal: http://comfyui:8188
       - "127.0.0.1:8188:8188"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            # GPU 1 saja: GPU 0 pernah lepas dari bus (Xid 79/154).
-            - driver: nvidia
-              device_ids: ["1"]
-              capabilities: [gpu]
+    # Jalur runtime dipakai, bukan blok deploy.resources: di host ini docker
+    # memakai CDI dan spec-nya belum tersedia, sementara daemon.json sudah
+    # memuat runtime "nvidia" sehingga jalur ini bekerja tanpa restart daemon
+    # (restart akan mematikan seluruh container project lain).
+    runtime: nvidia
+    environment:
+      # GPU 1 saja: GPU 0 pernah lepas dari bus (Xid 79/154).
+      NVIDIA_VISIBLE_DEVICES: "1"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8188/system_stats"]
       interval: 30s
