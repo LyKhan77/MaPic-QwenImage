@@ -43,6 +43,11 @@ tests/
 # Smoke test server inference ikut di-track (bukan unit test)
 !qwen_image_server/smoke_test.py
 
+# Rahasia environment — jangan pernah di-commit (contoh tetap dilacak)
+**/.env
+**/.env.local
+!**/.env.example
+
 # Qwen-Image inference server venv + HF cache
 qwen_image_server/.venv/
 qwen_image_server/venv/
