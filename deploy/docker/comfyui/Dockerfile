@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git ffmpeg libgl1 libglib2.0-0 curl \
+        git ffmpeg libgl1 libglib2.0-0 curl python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Commit dipin supaya build dapat direproduksi.
