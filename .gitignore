@@ -52,3 +52,6 @@ qwen-image.service
 
 # Playwright MCP artifacts (screenshots, console logs, snapshots)
 .playwright-mcp/
+
+# Artefak task runner Pi (log perintah background)
+.pi/
