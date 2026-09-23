@@ -20,8 +20,6 @@ tmp/
 temp/
 *.tmp
 *test/
-mapic-glm.service
-start-mapic-glm.sh
 # Dokumentasi (.md) dilacak seluruhnya — tidak ada dokumentasi yang diabaikan.
 # Hanya catatan sesi (plans) yang diabaikan; file-nya tetap ada di disk,
 # hanya tidak ikut masuk repo.

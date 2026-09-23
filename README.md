@@ -14,7 +14,7 @@ MaPic turns text prompts and reference images into production-quality visuals wi
 *   **Model Load Controls:** The UI can load and unload the model. The inference server also unloads from VRAM after 1 hour of inactivity.
 *   **Generation Queue:** Users can submit another prompt while a generation is active by clicking **New Generation**. The active loading view stays read-only.
 *   **Active Generation Recovery:** The active generation indicator shows queued/running/saving jobs, rehydrates the current user's active job view after refresh, and auto-focuses the latest finished result (including multi-queue completion order).
-*   **Configurable Generation Params:** Frontend exposes `num_inference_steps`, True CFG scale (with negative prompt), and 1K/2K resolution.
+*   **Configurable Generation Params:** Frontend exposes `num_inference_steps` and True CFG scale (with negative prompt). Resolusi terkunci di 1K — 2048 ditolak host ini.
 *   **History Management:** Generated images and prompts are saved to Supabase and can be viewed, selected, or deleted.
 *   **Secure Auth:** Google OAuth 2.0 via Supabase Authentication.
 *   **Responsive UI:** Collapsible sidebar, dark/light mode, Framer Motion animations, and mobile-friendly layout.
@@ -49,7 +49,7 @@ Berjalan sepenuhnya di jaringan kantor, sebagai container Docker di `gspe-ai2`:
 | Backend health | `http://192.168.2.142:8281/api/health` | Status rantai ke facade |
 | ComfyUI | `127.0.0.1:8188` | Debug saja; dari komputer lain pakai SSH tunnel |
 
-Jalur publik sudah **ditutup** (2026-09-23): project Vercel `mapic-glm` dan tunnel Cloudflare tidak dipakai lagi, sehingga tidak ada titik masuk dari luar jaringan kantor. Alasan teknisnya: halaman HTTPS tidak boleh memanggil backend HTTP (mixed content), jadi mengekspos frontend ke publik selalu menuntut tunnel HTTPS tambahan — satu titik gagal yang tidak dibutuhkan karena semua pengguna ada di kantor.
+Jalur publik sudah **ditutup** (2026-09-23): project Vercel lama dan tunnel Cloudflare tidak dipakai lagi, sehingga tidak ada titik masuk dari luar jaringan kantor. Alasan teknisnya: halaman HTTPS tidak boleh memanggil backend HTTP (mixed content), jadi mengekspos frontend ke publik selalu menuntut tunnel HTTPS tambahan — satu titik gagal yang tidak dibutuhkan karena semua pengguna ada di kantor.
 
 ## 🛠️ Tech Stack
 

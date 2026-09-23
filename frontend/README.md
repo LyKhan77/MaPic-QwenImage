@@ -22,7 +22,10 @@ This is the frontend for Mapic, built with React, Vite, Tailwind CSS, and Supaba
    ```env
    VITE_SUPABASE_URL=https://your-project.supabase.co
    VITE_SUPABASE_ANON_KEY=your-anon-key
+   VITE_API_URL=http://192.168.2.142:8281/api
    ```
+
+   `VITE_API_URL` menunjuk backend di jaringan kantor dan ikut ditanam saat build. Tanpa nilai ini, klien memakai fallback `http://<hostname>:8281/api`.
 
 3. **Run Development Server:**
    ```bash

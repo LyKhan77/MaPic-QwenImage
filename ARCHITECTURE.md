@@ -129,13 +129,13 @@ Empat unit systemd digantikan satu compose project `mapic`. Alasan praktisnya:
 
 ### 4.6 Facade mempertahankan kontrak API lama
 
-Facade mengekspos `/v1/images/generations`, `/v1/images/edits`, `/health`, `/v1/system/load` — nama dan bentuk yang sama seperti server inference sebelumnya. Karena itu migrasi dari GLM-Image ke Qwen-Image tidak menyentuh backend maupun frontend sama sekali. Penerjemahan ke ComfyUI terjadi seluruhnya di dalam facade.
+Facade mengekspos `/v1/images/generations`, `/v1/images/edits`, `/health`, `/v1/system/load` — nama dan bentuk yang sama seperti server inference sebelumnya. Karena itu penggantian engine inference tidak menyentuh backend maupun frontend sama sekali. Penerjemahan ke ComfyUI terjadi seluruhnya di dalam facade.
 
 ### 4.7 Hanya LAN, tanpa tunnel
 
 Cloudflare Tunnel dan Vercel ditinggalkan karena dua hal: tidak dibutuhkan (semua pengguna ada di kantor) dan bermasalah secara teknis — halaman HTTPS tidak boleh memanggil backend HTTP (mixed content), jadi tunnel justru menambah titik gagal.
 
-Jalur itu ditutup penuh pada 2026-09-23: project Vercel `mapic-glm` dihapus, `frontend/vercel.json` dan endpoint `/api/tunnel-status` (sisa fitur auto-deteksi tunnel) ikut dibuang. Tidak ada lagi titik masuk dari luar jaringan kantor — satu-satunya cara membuka aplikasi adalah `http://192.168.2.142:5151` dari LAN. Kalau nanti perlu diakses dari luar, ingat syaratnya: backend harus ikut HTTPS, karena browser memblokir panggilan dari halaman HTTPS ke `http://192.168.2.142:8281`.
+Jalur itu ditutup penuh pada 2026-09-23: project Vercel lama dihapus, `frontend/vercel.json` dan endpoint `/api/tunnel-status` (sisa fitur auto-deteksi tunnel) ikut dibuang. Tidak ada lagi titik masuk dari luar jaringan kantor — satu-satunya cara membuka aplikasi adalah `http://192.168.2.142:5151` dari LAN. Kalau nanti perlu diakses dari luar, ingat syaratnya: backend harus ikut HTTPS, karena browser memblokir panggilan dari halaman HTTPS ke `http://192.168.2.142:8281`.
 
 ### 4.8 Inference diserialkan
 

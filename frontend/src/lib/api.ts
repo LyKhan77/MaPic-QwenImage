@@ -1,5 +1,5 @@
 const API_URL = import.meta.env.VITE_API_URL
-  || `http://${window.location.hostname}:8181/api`
+  || `http://${window.location.hostname}:8281/api`
 
 export type ModelStatus = 'ready' | 'loading' | 'offline' | 'unloaded'
 

@@ -1,6 +1,6 @@
 # Project Overview
 
-MaPic turns text prompts and reference images into production-quality visuals — running entirely on local hardware. Built on **Qwen-Image 2.1** (7B single-stream DiT + Qwen3-VL 8B encoder + 64-channel RGBA VAE), it delivers text-to-image and up to 10-reference image-to-image generation at 1K/2K with no cloud dependencies, no API costs, and no rate limits.
+MaPic turns text prompts and reference images into production-quality visuals — running entirely on local hardware. Built on **Qwen-Image 2.1** (7B single-stream DiT + Qwen3-VL 8B encoder + 64-channel RGBA VAE), it delivers text-to-image and up to 10-reference image-to-image generation at 1K with no cloud dependencies, no API costs, and no rate limits.
 
 project references :
 - `https://huggingface.co/Qwen/Qwen-Image-2.1`
@@ -25,7 +25,7 @@ project references :
 - **Configurable generation params:** `num_inference_steps` (20-75, default 40), `true_cfg_scale` (1.0-3.0, default 1.0 = guidance off, butuh negative prompt) — lewat modal settings frontend. Selector resolusi sudah disembunyikan karena host ini 1K saja.
 - **Frontend:** input di bar bawah otomatis membawa prompt + gambar hasil sebagai referensi sehingga iterasi I2I jalan dari UI. Modal settings di-portal ke `document.body` karena `backdrop-filter` pada root-nya menjadikan elemen itu containing block untuk `position: fixed`.
 - **Docs deploy:** `deploy/docker/README.md` — operasional, struktur folder model, catatan GPU, dan cara rebuild per layanan.
-- **Jalur publik ditutup (2026-09-23):** project Vercel `mapic-glm` dihapus, `frontend/vercel.json` dan endpoint `/api/tunnel-status` ikut dibuang. Tidak ada titik masuk dari luar jaringan kantor; akses hanya `http://192.168.2.142:5151`. Mengembalikannya menuntut HTTPS di backend juga, karena browser memblokir halaman HTTPS yang memanggil backend HTTP.
+- **Jalur publik ditutup (2026-09-23):** project Vercel lama dihapus, `frontend/vercel.json` dan endpoint `/api/tunnel-status` ikut dibuang. Tidak ada titik masuk dari luar jaringan kantor; akses hanya `http://192.168.2.142:5151`. Mengembalikannya menuntut HTTPS di backend juga, karena browser memblokir halaman HTTPS yang memanggil backend HTTP.
 
 ### Key Files
 | File | Role |
@@ -89,10 +89,11 @@ MaPic/
 │       │   └── Dashboard.tsx          # Main app UI — orchestrates canvas, sidebar, prompt, model status
 │       ├── components/
 │       │   ├── ImageCanvas.tsx        # Displays generated image, download & copy actions
-│       │   ├── PromptInput.tsx        # Prompt textarea + reference image upload (up to 3 images)
+│       │   ├── PromptInput.tsx        # Prompt textarea + reference image upload (up to 10 images)
 │       │   ├── Sidebar.tsx            # Collapsible sidebar — history list, new chat, theme toggle, logout
 │       │   ├── ModelStatusBadge.tsx   # Shows model load/unload/ready status with load/unload actions
 │       │   ├── GenerationStageBadge.tsx # Real-time generation stage list (top-right)
+│       │   ├── GenerationTimeDisplay.tsx # Estimasi waktu proses dari stage + step saat ini
 │       │   ├── ActiveGenerationsIndicator.tsx # Bottom-right global active gen pill (queue, other users)
 │       │   ├── Loader.tsx             # Animated loading spinner
 │       │   └── BearAnimation.tsx      # Decorative idle animation component
@@ -100,6 +101,8 @@ MaPic/
 │       │   └── useGenerationStatus.ts # Hook returning human-readable generation step text
 │       └── lib/
 │           ├── api.ts                 # Frontend API client — health, generate, history, load/unload
+│           ├── activeGenerationState.ts # Aturan kapan loader aktif / job dianggap selesai
+│           ├── generation.ts          # Estimasi durasi generasi per stage
 │           ├── supabase.ts            # Supabase JS client initialization (auth + DB)
 │           └── utils.ts               # Utility helpers (cn — clsx + tailwind-merge)
 │
@@ -111,7 +114,7 @@ MaPic/
 │   ├── requirements-facade.txt        # Deps facade untuk image Docker (tanpa torch)
 │   └── requirements.txt               # Deps jalur diffusers (disimpan sebagai rujukan)
 │
-└── test/                              # Screenshots & test images
+└── temp/                              # Artefak lokal (uji A/B, backup, log) — diabaikan git
 ```
 
 ### Data Flow
