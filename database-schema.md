@@ -1,25 +1,31 @@
 # MaPic Database Schema
 
-Last reviewed: 2026-05-12
+Last reviewed: **2026-09-23** — kali ini lewat introspeksi langsung ke database live.
 
-This document describes the Supabase database and storage schema used by MaPic. It is based on the current codebase, not a live database introspection, because no Supabase migration files are present in this repository.
+Dokumen ini menjelaskan skema Supabase yang dipakai MaPic. Isinya diverifikasi dengan membaca spesifikasi OpenAPI PostgREST (`GET {SUPABASE_URL}/rest/v1/` memakai service role key), sehingga mencerminkan kolom yang **benar-benar ada**, bukan hanya yang diasumsikan dari kode.
 
-## Sources Reviewed
-
-- `backend/services/supabase_service.py`
-- `backend/schemas.py`
-- `backend/main.py`
-- `frontend/src/lib/supabase.ts`
-- `frontend/src/types.ts`
-- `API.md`
+```bash
+# Cara memverifikasi ulang
+cd backend && source .venv/bin/activate
+python - <<'PY'
+import json, os, urllib.request
+from dotenv import load_dotenv
+load_dotenv(".env")
+url, key = os.environ["SUPABASE_URL"].rstrip("/"), os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+req = urllib.request.Request(f"{url}/rest/v1/", headers={"apikey": key, "Authorization": f"Bearer {key}"})
+spec = json.load(urllib.request.urlopen(req))
+for table, schema in spec["definitions"].items():
+    print(table, {c: m.get("format", m.get("type")) for c, m in schema["properties"].items()})
+PY
+```
 
 ## Supabase Products Used
 
 | Product | Usage |
 | --- | --- |
-| Auth | Frontend login/session management via Supabase Auth. |
-| Postgres | Stores generated image history in `public.generations`. |
-| Storage | Stores generated PNG files in the `generated_images` bucket. |
+| Auth | Login/sesi frontend lewat Supabase Auth (Google OAuth). Saat review: 4 user terdaftar. |
+| Postgres | Menyimpan riwayat generasi di `public.generations`. Saat review: 16 baris. |
+| Storage | PNG hasil generasi di bucket `generated_images`. Bucket `generated_videos` masih ada sebagai sisa fitur video, tidak dipakai kode saat ini. |
 
 ## Auth Model
 
@@ -33,18 +39,17 @@ The backend uses `SUPABASE_SERVICE_ROLE_KEY` for database and storage operations
 
 Stores one row per completed image generation.
 
-| Column | Type | Nullable | Default | Source / Purpose |
-| --- | --- | --- | --- | --- |
-| `id` | `uuid` | No | Expected: `gen_random_uuid()` | Generation record ID returned by API and used for deletion. |
-| `user_id` | `uuid` | No | None | Owner user ID from Supabase Auth (`auth.users.id`). |
-| `prompt` | `text` | No | None | User prompt. Backend validates request prompt length `1..2000`. |
-| `image_path` | `text` | No | None | Internal Supabase Storage object path, format: `{user_id}/{uuid}.png`. |
-| `public_url` | `text` | No | None | Public CDN URL returned by Supabase Storage. |
-| `created_at` | `timestamptz` | No | Expected: `now()` | Used for history sorting, newest first. |
+| Column | Type | Nullable (live) | Source / Purpose |
+| --- | --- | --- | --- |
+| `id` | `uuid` | No | Generation record ID returned by API and used for deletion. |
+| `user_id` | `uuid` | No | Owner user ID from Supabase Auth (`auth.users.id`). |
+| `prompt` | `text` | No | User prompt. Backend validates request prompt length `1..2000`. |
+| `image_path` | `text` | No | Internal Supabase Storage object path, format: `{user_id}/{uuid}.png`. |
+| `public_url` | `text` | No | Public CDN URL returned by Supabase Storage. |
+| `created_at` | `timestamptz` | **Ya** | Used for history sorting, newest first. Live DB tidak memasang constraint NOT NULL — semua 16 baris terisi, tetapi kolomnya sendiri nullable. |
+| `media_type` | `text` | Ya | **Kolom warisan** dari fitur video. Seluruh baris berisi `image`. Tidak ada satu pun kode aplikasi yang membaca atau menulisnya (jalur insert di `supabase_service.py` hanya mengirim `user_id, prompt, image_path, public_url`). Aman dibiarkan; jangan dijadikan acuan jenis media — jenisnya ditentukan ekstensi di `image_path`. |
 
-### Expected DDL
-
-Use this as the canonical expected schema if recreating the database:
+### DDL (mengikuti skema live)
 
 ```sql
 create extension if not exists "pgcrypto";
@@ -55,12 +60,15 @@ create table if not exists public.generations (
   prompt text not null check (char_length(prompt) between 1 and 2000),
   image_path text not null,
   public_url text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz default now(),   -- nullable di DB live
+  media_type text                          -- warisan fitur video, tidak dipakai kode
 );
 
 create index if not exists generations_user_created_at_idx
   on public.generations (user_id, created_at desc);
 ```
+
+Bila membuat ulang dari nol, kolom `media_type` boleh dihilangkan — tidak ada konsumen yang membutuhkannya.
 
 ## Query Patterns
 
@@ -100,7 +108,11 @@ Stores generated PNG files.
 | Bucket name | `generated_images` |
 | Object path format | `{user_id}/{uuid}.png` |
 | Content type | `image/png` |
-| Public access | Required by current app because `public_url` is shown, downloaded, and copied from the frontend. |
+| Public access | `true` (terverifikasi) — diperlukan karena `public_url` ditampilkan, diunduh, dan disalin dari frontend. |
+
+### Bucket: `generated_videos` (warisan)
+
+Masih ada dan publik, tetapi tidak ada kode MaPic saat ini yang menulis ke sana. Kandidat penghapusan bila tidak ada rencana fitur video.
 
 Example object path:
 
@@ -166,7 +178,7 @@ using (
 ## Data Lifecycle
 
 1. User submits prompt and optional reference images.
-2. Backend generates image through the local GLM-Image server.
+2. Backend meminta gambar ke facade, yang menjalankannya lewat ComfyUI + Qwen-Image 2.1 GGUF di GPU.
 3. Backend uploads PNG to `generated_images`.
 4. Backend inserts a `public.generations` row.
 5. Frontend displays `public_url` and history sorted by `created_at desc`.
@@ -175,7 +187,8 @@ using (
 ## Notes And Gaps
 
 - Reference images are request-only and are not stored in the database.
-- Generation settings (`num_inference_steps`, `guidance_scale`) are not persisted in `public.generations`.
+- Generation settings (`num_inference_steps`, `true_cfg_scale`) are not persisted in `public.generations`.
 - Active/queued generation state is in backend memory only and is not stored in Supabase.
-- No local migration files exist in this repository, so live constraints, indexes, and policies should be verified in the Supabase dashboard or with `supabase db pull`.
+- Kolom `created_at` nullable di DB walau semua baris terisi; constraint NOT NULL tidak dipasang. Index `generations_user_created_at_idx` **tidak bisa diverifikasi** lewat PostgREST — cek di dashboard Supabase (Database → Indexes) bila perlu.
+- Kebijakan RLS juga tidak terbaca lewat PostgREST karena service role melewatinya. Bagian "Recommended RLS Policies" di bawah adalah usulan, belum tentu yang terpasang.
 - `DELETE /api/history/{id}` deletes by generation ID only; it does not verify the row belongs to the requesting user. This is safe only if the backend route is otherwise protected or trusted. Consider changing the API to require `user_id` ownership validation before deletion.

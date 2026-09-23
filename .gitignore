@@ -22,13 +22,17 @@ temp/
 *test/
 mapic-glm.service
 start-mapic-glm.sh
-# Documentation (keep only README.md)
+# Documentation — hanya dokumen inti yang dilacak; sisanya diabaikan
 *.md
 !README.md
-.gemini/
+!API.md
+!ARCHITECTURE.md
+!WORKFLOW.md
 !database-schema.md
 !vercel-docs.md
-!API.md
+!AGENTS.md
+!CLAUDE.md
+.gemini/
 
 # Superpowers plans & specs are tracked as session records
 !docs/superpowers/plans/
