@@ -47,7 +47,10 @@ project references :
 ```
 MaPic/
 ├── AGENTS.md                          # Agent behavior guidelines & project state
+├── ARCHITECTURE.md                    # Desain sistem, tanggung jawab komponen, alasan keputusan
+├── WORKFLOW.md                        # Alur generasi, alur pengembangan, runbook
 ├── API.md                             # API documentation
+├── database-schema.md                 # Skema Supabase (diverifikasi lewat introspeksi live)
 ├── README.md                          # Human-facing project overview
 ├── CLAUDE.md                          # Claude-specific instructions
 ├── start-app.sh                       # Menjalankan stack Docker (delegasi ke deploy/docker)
