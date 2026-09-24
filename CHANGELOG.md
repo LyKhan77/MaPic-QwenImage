@@ -7,6 +7,20 @@ setiap entri memuat konteks, daftar berkas yang berubah, bukti, dampak, dan cara
 
 ---
 
+## 2026-09-24 — `chore: abaikan spesifikasi dan rencana desain lokal`
+
+**Konteks.** Spesifikasi serta rencana kerja ialah catatan lokal, bukan dokumen yang dikomit. Commit rancangan sebelumnya keliru melacak satu spesifikasi.
+
+**Yang berubah.** `.gitignore` mengabaikan `docs/plans/`, `docs/superpowers/plans/`, `docs/superpowers/specs/`, dan `.cooper/context/`. Spesifikasi yang terlanjur masuk commit dikeluarkan dari tracking tanpa menghapus file lokal.
+
+**Bukti.** `git check-ignore -v` untuk plans/specs/checkpoint; `git ls-files` memastikan tak ada spec/plan terlacak. Belum ada kode fitur atau uji GPU.
+
+**Dampak.** Hanya aturan tracking Git berubah; perilaku aplikasi, skema, dan deployment tetap.
+
+**Rollback.** `git revert <sha>` mengembalikan aturan ignore; tidak ada migrasi data.
+
+---
+
 ## 2026-09-23 — `fix(frontend): layout responsif mobile + drawer sidebar`
 
 **Konteks.** Layout web app desktop-only. Audit Playwright pada viewport 390px menemukan

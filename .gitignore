@@ -18,13 +18,13 @@ dist/
 # Temporary files
 tmp/
 temp/
+.cooper/context/
 *.tmp
 *test/
-# Dokumentasi (.md) dilacak seluruhnya — tidak ada dokumentasi yang diabaikan.
-# Hanya catatan sesi (plans) yang diabaikan; file-nya tetap ada di disk,
-# hanya tidak ikut masuk repo.
+# Dokumentasi produk dilacak; catatan sesi (plans dan specs) tetap lokal.
 docs/plans/
 docs/superpowers/plans/
+docs/superpowers/specs/
 .gemini/
 .commandcode/
 
