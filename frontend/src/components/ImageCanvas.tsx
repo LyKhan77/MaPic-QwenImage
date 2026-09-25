@@ -22,9 +22,11 @@ interface ImageCanvasProps {
   pendingGenParams?: GenerationTimeParams
   genKey?: number
   isViewingActiveGeneration?: boolean
+  removeBg: boolean
+  onRemoveBgChange: (next: boolean) => void
 }
 
-export default function ImageCanvas({ currentGeneration, isLoading, isRemovingBackground = false, modelStatus, onGenerate, onRemoveBackground, pendingGenParams, genKey, isViewingActiveGeneration = true }: ImageCanvasProps) {
+export default function ImageCanvas({ currentGeneration, isLoading, isRemovingBackground = false, modelStatus, onGenerate, onRemoveBackground, pendingGenParams, genKey, isViewingActiveGeneration = true, removeBg, onRemoveBgChange }: ImageCanvasProps) {
   const [isTyping, setIsTyping] = useState(false)
   const generationStatus = useGenerationStatus(isLoading)
   // Deteksi hasil cutout dari label prompt server (tidak ada kolom DB baru) —
@@ -222,6 +224,8 @@ export default function ImageCanvas({ currentGeneration, isLoading, isRemovingBa
                   isCentralized={true}
                   onTyping={setIsTyping}
                   modelStatus={modelStatus}
+                  removeBg={removeBg}
+                  onRemoveBgChange={onRemoveBgChange}
                />
             </motion.div>
           )}

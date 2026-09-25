@@ -7,6 +7,35 @@ setiap entri memuat konteks, daftar berkas yang berubah, bukti, dampak, dan cara
 
 ---
 
+## 2026-09-25 — `fix: keep remove-background mode across prompt input views`
+
+**Konteks.** Verifikasi browser nyata menemukan cacat pada toggle Remove Background. `PromptInput` dipasang dua tempat yang saling menggantikan di `Dashboard.tsx`: instans terpusat di dalam `ImageCanvas` (tampil selama belum ada `currentGen`) dan bar bawah (tampil begitu `currentGen` ada). State `removeBg` hidup di `PromptInput`, jadi berpindah tampilan mengembalikannya ke `false` diam-diam. Reproduksi: nyalakan toggle di input terpusat → klik satu item riwayat → bar bawah terpasang dengan `removeBg=false` (`aria-pressed="false"`), lalu tombol kirim menembak `/api/generate` bukan `/api/remove-background`. Ini melanggar alur yang disetujui: nyalakan Remove Background → pilih sumber dari riwayat atau unggah → kirim.
+
+**Yang berubah.**
+
+| Berkas | Perubahan |
+|---|---|
+| `frontend/src/pages/Dashboard.tsx` | State `removeBg` (default `false`) pindah ke sini dan diteruskan sebagai pasangan prop terkontrol (`removeBg`, `onRemoveBgChange`) ke **kedua** jalur pemasangan `PromptInput` — lewat `<ImageCanvas>` dan bar bawah. `handleNewChat` juga `setRemoveBg(false)` supaya obrolan baru tidak mewarisi mode cutout; muat ulang halaman tetap `false` karena nilai awalnya `false`. Tidak ada perubahan lain pada handler generate/cutout, `hasCurrentUserGenerationWork`, atau pemilihan riwayat. |
+| `frontend/src/components/ImageCanvas.tsx` | Prop `removeBg`/`onRemoveBgChange` ditambahkan ke `ImageCanvasProps` dan diteruskan apa adanya ke `PromptInput` terpusat, sejajar dengan `onGenerate`/`onRemoveBackground` yang sudah ada. Tidak ada perubahan tampilan atau logika kanvas. |
+| `frontend/src/components/PromptInput.tsx` | `useState` lokal `removeBg` dihapus; nilainya kini datang dari prop. `toggleRemoveBg` memanggil `onRemoveBgChange(!removeBg)` lalu menutup modal Settings seperti sebelumnya. Tombol gunting tidak disentuh: `type="button"`, `aria-label="Remove Background"`, `aria-pressed={removeBg}`, kelas `h-11 w-11`/`min-h-11 min-w-11`, `title` sama persis. Perilaku lokal lain utuh: input teks disabled saat cutout, penyembunyian Settings dan portal, banner model sleeping, batas 1 gambar + pesannya, latch submit, penjaga `isReadingFiles`, penjaga versi prefill riwayat. |
+| `frontend/scripts/check-remove-background-ui.mjs` | Tambah penjaga regresi berbasis pembacaan sumber (pola `check-active-generation-state.mjs`): `PromptInput` tidak boleh punya `[removeBg, setRemoveBg]`, wajib mendeklarasikan kedua prop, wajib memanggil `onRemoveBgChange(!removeBg)`; `Dashboard` wajib punya `useState(false)`, mengirim pasangan prop itu tepat dua kali ke `PromptInput` dan sekali ke `ImageCanvas`, serta mereset `setRemoveBg(false)` di `handleNewChat`. Tanpa dependensi baru. |
+| `CHANGELOG.md` | Entri ini. |
+
+**Bukti.**
+
+- `npm --prefix frontend run check:remove-background` → empat keluaran lama tetap (`stripDataUrlPrefix OK`, `canSubmitRemoveBackground 4 outcomes OK`, `isCutoutGeneration exact-label-only OK`, `removeBackgroundSendLabel busy/idle OK`) plus `removeBg owned by Dashboard, forwarded to both inputs OK`.
+- `npm --prefix frontend run build` → `✓ 2220 modules transformed.` `dist/assets/index-D1GHOhN_.css 39.39 kB` `dist/assets/index-DXmfOvhv.js 621.54 kB` `✓ built in 1.42s` (hanya peringatan chunk >500 kB yang sudah lama ada).
+- `npm --prefix frontend run lint` → `✖ 5 problems (5 errors, 0 warnings)` — sama persis dengan jumlah di commit sebelumnya; kelimanya pra-eksisting (`BearAnimation.tsx:27`, `GenerationStageBadge.tsx:25`/`:26`, `useGenerationStatus.ts:25`, `Login.tsx:45`) dan tidak ada di berkas yang disentuh commit ini.
+- `SUPABASE_URL=https://example.supabase.co SUPABASE_SERVICE_ROLE_KEY=test backend/.venv/bin/python -m unittest discover -s backend/tests` → `Ran 33 tests in 0.204s` `OK`.
+- `git diff --check` bersih.
+- Jejak statis (dibaca dari kode final, bukan diklaim sebagai bukti browser): saat `removeBg === true` dan tampilan berpindah dari input terpusat ke bar bawah, `currentGen` menjadi non-null sehingga cabang `{currentGen && (...)}` di `Dashboard.tsx` memasang `PromptInput` bar bawah dengan `removeBg={removeBg}` — nilai state Dashboard yang sama, bukan state komponen yang baru lahir. Karena itu `aria-pressed` bar bawah ikut `true` dan submit memakai jalur `onRemoveBackground`. Gambar sumber tidak hilang karena ia di-prefill lewat `initialImageUrl` dari `currentGen.public_url` seperti sebelumnya. Verifikasi browser nyata dijalankan controller **setelah** commit ini; tidak diklaim di sini.
+
+**Dampak.** Perilaku berubah hanya pada satu kasus: mode cutout kini bertahan saat pengguna memilih sumber dari riwayat, sehingga alur nyalakan-toggle → pilih sumber → kirim berjalan sesuai rancangan. Saat toggle mati tidak ada perubahan. Tidak ada perubahan skema DB, Docker, backend, atau berkas di luar empat berkas frontend di atas; tidak ada konteks/provider baru.
+
+**Rollback.** `git revert <sha>` mengembalikan `removeBg` sebagai state lokal `PromptInput` beserta hilangnya penjaga regresi di skrip cek; tidak ada migrasi data atau artefak runtime yang perlu dibersihkan.
+
+---
+
 ## 2026-09-25 — `feat: add remove background toggle to prompt input`
 
 **Konteks.** Langkah ketiga fitur Remove Background: satu toggle gunting di baris input yang mengubah Generate (Qwen) menjadi Remove Background (CPU). Satu tombol, bukan menu tiga mode; tidak ada Image Edit maupun masking. Toggle harus hidup saat model Qwen `unloaded` karena endpoint cutout tidak menyentuh ComfyUI. Sumber cutout tetap ada di riwayat setelah diproses: hasilnya record baru, bukan penimpa. Bobot model belum di-mount di container (Task 4), jadi di host endpoint masih 503 — UI sendiri sudah mengirim request yang benar.

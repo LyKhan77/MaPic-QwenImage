@@ -46,6 +46,9 @@ export default function Dashboard({ session }: DashboardProps) {
   const [isViewingActiveGeneration, setIsViewingActiveGeneration] = useState(false)
   const [isNewGenerationDraft, setIsNewGenerationDraft] = useState(false)
   const [isRemovingBackground, setIsRemovingBackground] = useState(false)
+  // Mode cutout hidup di sini karena PromptInput dipasang dua tempat yang
+  // saling menggantikan (terpusat dan bar bawah).
+  const [removeBg, setRemoveBg] = useState(false)
   const hadCurrentUserGenerationWorkRef = useRef(false)
   const completionSyncRequestIdRef = useRef(0)
   const pendingGenerationCount = Object.keys(pendingGenerations).length
@@ -311,6 +314,8 @@ export default function Dashboard({ session }: DashboardProps) {
     setCurrentGen(null)
     setIsViewingActiveGeneration(false)
     setIsNewGenerationDraft(true)
+    // Obrolan baru selalu mulai dari Generate, bukan mewarisi mode cutout.
+    setRemoveBg(false)
   }
 
   const handleLoadModel = async () => {
@@ -376,6 +381,8 @@ export default function Dashboard({ session }: DashboardProps) {
              pendingGenParams={displayedGenParams ?? undefined}
              genKey={genKey}
              isViewingActiveGeneration={isViewingCurrentUserActiveGeneration}
+             removeBg={removeBg}
+             onRemoveBgChange={setRemoveBg}
            />
         </div>
 
@@ -391,6 +398,8 @@ export default function Dashboard({ session }: DashboardProps) {
               initialImageUrl={!isViewingActiveGeneration ? currentGen.public_url : undefined}
               modelStatus={modelStatus}
               queueLength={Math.max(pendingGenerationCount - 1, 0)}
+              removeBg={removeBg}
+              onRemoveBgChange={setRemoveBg}
             />
           </div>
         )}

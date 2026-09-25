@@ -28,9 +28,13 @@ interface PromptInputProps {
   initialImageUrl?: string
   modelStatus?: ModelStatus
   queueLength?: number
+  // Dikendalikan Dashboard: dua instans PromptInput (terpusat dan bar bawah)
+  // saling menggantikan, jadi mode cutout tidak boleh hidup di sini.
+  removeBg: boolean
+  onRemoveBgChange: (next: boolean) => void
 }
 
-export default function PromptInput({ onGenerate, onRemoveBackground, isLoading, isRemovingBackground = false, isCentralized, onTyping, initialPrompt, initialImageUrl, modelStatus, queueLength = 0 }: PromptInputProps) {
+export default function PromptInput({ onGenerate, onRemoveBackground, isLoading, isRemovingBackground = false, isCentralized, onTyping, initialPrompt, initialImageUrl, modelStatus, queueLength = 0, removeBg, onRemoveBgChange }: PromptInputProps) {
   const [prompt, setPrompt] = useState('')
   const [showReferences, setShowReferences] = useState(true)
   const [images, setImages] = useState<{ id: string; base64: string }[]>([])
@@ -38,7 +42,6 @@ export default function PromptInput({ onGenerate, onRemoveBackground, isLoading,
   const [steps, setSteps] = useState(40)
   const [cfgScale, setCfgScale] = useState(1.0)
   const [negativePrompt, setNegativePrompt] = useState('')
-  const [removeBg, setRemoveBg] = useState(false)
   const [isReadingFiles, setIsReadingFiles] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Cutout tidak mengosongkan lampiran seperti Generate, jadi klik ganda pada
@@ -94,7 +97,7 @@ export default function PromptInput({ onGenerate, onRemoveBackground, isLoading,
   // Modal Settings tidak relevan untuk cutout: ditutup saat toggle dinyalakan,
   // tombolnya disembunyikan, dan portal-nya dijaga `!removeBg`.
   const toggleRemoveBg = () => {
-    setRemoveBg((prev) => !prev)
+    onRemoveBgChange(!removeBg)
     setShowSettings(false)
   }
 

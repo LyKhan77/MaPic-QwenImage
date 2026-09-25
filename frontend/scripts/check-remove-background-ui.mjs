@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   REMOVE_BACKGROUND_LABEL,
   canSubmitRemoveBackground,
@@ -37,3 +38,31 @@ console.log('removeBackground: stripDataUrlPrefix OK')
 console.log('removeBackground: canSubmitRemoveBackground 4 outcomes OK')
 console.log('removeBackground: isCutoutGeneration exact-label-only OK')
 console.log('removeBackground: removeBackgroundSendLabel busy/idle OK')
+
+// Mode cutout harus dimiliki Dashboard: PromptInput dipasang dua tempat yang
+// saling menggantikan (terpusat dan bar bawah), jadi state lokal di sini akan
+// ter-reset ke false setiap pengguna memilih sumber dari riwayat.
+const readSource = (relative) =>
+  readFileSync(new URL(relative, import.meta.url), 'utf8')
+const promptInputSource = readSource('../src/components/PromptInput.tsx')
+const dashboardSource = readSource('../src/pages/Dashboard.tsx')
+const imageCanvasSource = readSource('../src/components/ImageCanvas.tsx')
+
+assert.equal(/\[removeBg, setRemoveBg\]/.test(promptInputSource), false)
+assert.match(promptInputSource, /removeBg: boolean/)
+assert.match(promptInputSource, /onRemoveBgChange: \(next: boolean\) => void/)
+assert.match(promptInputSource, /onRemoveBgChange\(!removeBg\)/)
+
+assert.match(dashboardSource, /const \[removeBg, setRemoveBg\] = useState\(false\)/)
+assert.match(imageCanvasSource, /removeBg={removeBg}/)
+assert.match(imageCanvasSource, /onRemoveBgChange={onRemoveBgChange}/)
+// Dua jalur pemasangan PromptInput di Dashboard (lewat ImageCanvas dan bar
+// bawah) harus menerima prop yang sama.
+assert.equal((dashboardSource.match(/removeBg={removeBg}/g) ?? []).length, 2)
+assert.equal((dashboardSource.match(/onRemoveBgChange={setRemoveBg}/g) ?? []).length, 2)
+const barPromptInputSource = dashboardSource.slice(dashboardSource.indexOf('<PromptInput'))
+assert.match(barPromptInputSource, /removeBg={removeBg}/)
+assert.match(barPromptInputSource, /onRemoveBgChange={setRemoveBg}/)
+assert.match(dashboardSource, /setRemoveBg\(false\)/)
+
+console.log('removeBackground: removeBg owned by Dashboard, forwarded to both inputs OK')
