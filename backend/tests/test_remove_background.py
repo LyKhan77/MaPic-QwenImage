@@ -1,5 +1,9 @@
+import importlib
 import os
+import sys
 import tempfile
+import threading
+import time
 import unittest
 from io import BytesIO
 from unittest.mock import patch
@@ -83,12 +87,25 @@ class RemoveBackgroundTest(unittest.TestCase):
             self.assertEqual(result.getpixel((0, 1))[3], 255)
 
     def test_exif_orientation_is_normalised(self):
-        stored = Image.new("RGB", (6, 2), (200, 100, 50))
+        # 3x2 stored, shown as 2x3 after orientation 6 (rotate 90 CW). Colours
+        # are distinct so a wrong rotation cannot pass on size alone.
+        stored = Image.new("RGB", (3, 2))
+        for index, colour in enumerate(
+            [
+                (255, 0, 0),
+                (0, 255, 0),
+                (0, 0, 255),
+                (255, 255, 0),
+                (0, 255, 255),
+                (255, 0, 255),
+            ]
+        ):
+            stored.putpixel((index % 3, index // 3), colour)
         exif = stored.getexif()
-        exif[274] = 6  # rotate 90 CW when displayed
+        exif[274] = 6
         buffer = BytesIO()
-        stored.save(buffer, format="JPEG", exif=exif)
-        model = Image.new("RGBA", (2, 6), (0, 0, 0, 255))
+        stored.save(buffer, format="PNG", exif=exif)
+        model = Image.new("RGBA", (2, 3), (0, 0, 0, 255))
 
         with patch.object(service, "_session_factory", return_value=object()), patch.object(
             service, "_extract", return_value=_png(model)
@@ -96,17 +113,57 @@ class RemoveBackgroundTest(unittest.TestCase):
             output = service.remove_background_png(buffer.getvalue())
 
         with Image.open(BytesIO(output)) as result:
-            self.assertEqual(result.size, (2, 6))
+            self.assertEqual(result.size, (2, 3))
+            # Displayed (x, y) is stored (y, 2 - 1 - x) for a 90 CW rotation.
+            self.assertEqual(result.getpixel((0, 0))[:3], (255, 255, 0))
+            self.assertEqual(result.getpixel((1, 0))[:3], (255, 0, 0))
+            self.assertEqual(result.getpixel((0, 1))[:3], (0, 255, 255))
+            self.assertEqual(result.getpixel((1, 1))[:3], (0, 255, 0))
+            self.assertEqual(result.getpixel((0, 2))[:3], (255, 0, 255))
+            self.assertEqual(result.getpixel((1, 2))[:3], (0, 0, 255))
+
+    def test_import_does_not_load_rembg(self):
+        for name in [key for key in sys.modules if key == "rembg" or key.startswith("rembg.")]:
+            del sys.modules[name]
+
+        importlib.reload(service)
+
+        self.assertNotIn("rembg", sys.modules)
+        self.assertNotIn("rembg.sessions", sys.modules)
 
     def test_missing_weights_raises_model_unavailable_without_network(self):
         source = _png(Image.new("RGBA", (4, 4), (0, 0, 0, 255)))
 
         with tempfile.TemporaryDirectory() as empty_home:
-            with patch.dict(os.environ, {"REMBG_HOME": empty_home}), patch.object(
+            with patch.dict(os.environ, {"REMBG_HOME": empty_home}) as env, patch.object(
                 service, "_session_factory", side_effect=AssertionError("session must not be built")
             ):
-                with self.assertRaises(service.ModelUnavailableError):
+                env.pop("U2NET_HOME", None)
+                env.pop("MODEL_CHECKSUM_DISABLED", None)
+                with self.assertRaises(service.ModelUnavailableError) as caught:
                     service.remove_background_png(source)
+
+            # The error names every path that was searched, since legacy_home does
+            # not follow REMBG_HOME, only U2NET_HOME. Match the two layouts instead.
+            self.assertIn(os.path.join(empty_home, "models"), str(caught.exception))
+            self.assertIn(os.path.join(".u2net", f"{service.MODEL_NAME}.onnx"), str(caught.exception))
+
+            # Nothing was downloaded and no offline override was left behind.
+            self.assertEqual(os.listdir(empty_home), [])
+            self.assertIsNone(os.environ.get("MODEL_CHECKSUM_DISABLED"))
+
+    def test_cutout_without_alpha_is_rejected(self):
+        source = Image.new("RGBA", (4, 4), (10, 20, 30, 255))
+        opaque_model = Image.new("RGB", (4, 4), (0, 0, 0))
+
+        with patch.object(service, "_session_factory", return_value=object()), patch.object(
+            service, "_extract", return_value=_png(opaque_model)
+        ):
+            with self.assertRaises(service.RemoveBackgroundError) as caught:
+                service.remove_background_png(_png(source))
+
+        self.assertIs(type(caught.exception), service.RemoveBackgroundError)
+        self.assertIn("alpha", str(caught.exception))
 
     def test_model_size_mismatch_raises(self):
         source = Image.new("RGBA", (4, 4), (0, 0, 0, 255))
@@ -129,6 +186,22 @@ class RemoveBackgroundTest(unittest.TestCase):
         ):
             service.remove_background_png(source)
             service.remove_background_png(source)
+
+        self.assertEqual(factory.call_count, 1)
+
+    def test_concurrent_callers_build_one_session(self):
+        def slow_factory():
+            time.sleep(0.05)
+            return object()
+
+        with patch.object(service, "_session_factory", side_effect=slow_factory) as factory:
+            threads = [
+                threading.Thread(target=service._session_for_model) for _ in range(8)
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
 
         self.assertEqual(factory.call_count, 1)
 

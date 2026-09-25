@@ -6,6 +6,7 @@ weight file fails fast instead of triggering an implicit download.
 """
 
 import os
+import threading
 from io import BytesIO
 
 from PIL import Image, ImageChops, ImageOps
@@ -13,6 +14,7 @@ from PIL import Image, ImageChops, ImageOps
 MODEL_NAME = "isnet-general-use"
 
 _session = None
+_session_lock = threading.Lock()
 
 
 class RemoveBackgroundError(Exception):
@@ -23,29 +25,48 @@ class ModelUnavailableError(RemoveBackgroundError):
     """Raised when the local ONNX weights for MODEL_NAME are missing."""
 
 
-def _model_path() -> str | None:
-    home = os.environ.get("REMBG_HOME")
-    if not home:
-        xdg_data_home = os.environ.get("XDG_DATA_HOME")
-        home = os.path.join(xdg_data_home, "rembg") if xdg_data_home else os.path.join(
-            os.path.expanduser("~"), ".rembg"
+def _candidate_paths() -> list[str]:
+    """Every path rembg may resolve `{MODEL_NAME}.onnx` from, in its own order."""
+    legacy_home = os.path.expanduser(
+        os.environ.get(
+            "U2NET_HOME", os.path.join(os.environ.get("XDG_DATA_HOME", "~"), ".u2net")
         )
-    for candidate in (
-        os.path.join(home, "models", MODEL_NAME, f"{MODEL_NAME}.onnx"),
-        os.path.join(home, f"{MODEL_NAME}.onnx"),
-    ):
+    )
+    if os.environ.get("U2NET_HOME"):
+        rembg_home = legacy_home
+    else:
+        xdg_data_home = os.environ.get("XDG_DATA_HOME")
+        default = os.path.join(xdg_data_home, "rembg") if xdg_data_home else "~/.rembg"
+        rembg_home = os.path.expanduser(os.environ.get("REMBG_HOME", default))
+    return [
+        os.path.join(rembg_home, "models", MODEL_NAME, f"{MODEL_NAME}.onnx"),
+        os.path.join(legacy_home, f"{MODEL_NAME}.onnx"),
+    ]
+
+
+def _fallback_model_path() -> str | None:
+    for candidate in _candidate_paths():
         if os.path.isfile(candidate):
             return candidate
     return None
 
 
-def _session_factory():
+def _model_path() -> str | None:
+    """Path rembg will use, or None. Never triggers a download."""
+    try:
+        from rembg.sessions.dis_general_use import DisSession
+    except ImportError:
+        return _fallback_model_path()
+    return DisSession.resolve_existing(f"{MODEL_NAME}.onnx")
+
+
+def _session_factory() -> object:
     from rembg import new_session
 
     return new_session(MODEL_NAME)
 
 
-def _extract(image_bytes: bytes, session) -> bytes:
+def _extract(image_bytes: bytes, session: object) -> bytes:
     from rembg import remove
 
     return remove(image_bytes, session=session)
@@ -54,11 +75,15 @@ def _extract(image_bytes: bytes, session) -> bytes:
 def _session_for_model():
     global _session
     if _session is None:
-        if _model_path() is None:
-            raise ModelUnavailableError(
-                f"Local weights for {MODEL_NAME} not found; refusing to download."
-            )
-        _session = _session_factory()
+        with _session_lock:
+            if _session is None:
+                if _model_path() is None:
+                    searched = ", ".join(_candidate_paths())
+                    raise ModelUnavailableError(
+                        f"Local weights for {MODEL_NAME} not found; refusing to download. "
+                        f"Searched: {searched}"
+                    )
+                _session = _session_factory()
     return _session
 
 
@@ -84,6 +109,11 @@ def remove_background_png(source: bytes) -> bytes:
 
         with Image.open(BytesIO(cutout_bytes)) as cutout:
             cutout.load()
+            if "A" not in cutout.getbands():
+                raise RemoveBackgroundError(
+                    f"Cutout mode {cutout.mode} has no alpha channel; refusing to return an "
+                    "opaque result."
+                )
             mask = cutout.convert("RGBA")
 
         if mask.size != normalised.size:
@@ -91,9 +121,9 @@ def remove_background_png(source: bytes) -> bytes:
                 f"Cutout size {mask.size} does not match source size {normalised.size}."
             )
 
-        result = normalised.copy()
-        result.putalpha(ImageChops.darker(normalised.getchannel("A"), mask.getchannel("A")))
-        return _to_png(result)
+        alpha = mask.getchannel("A")
+        normalised.putalpha(ImageChops.darker(normalised.getchannel("A"), alpha))
+        return _to_png(normalised)
     except ModelUnavailableError:
         raise
     except RemoveBackgroundError:
