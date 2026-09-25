@@ -270,10 +270,12 @@ export default function Dashboard({ session }: DashboardProps) {
 
   // Jalur cutout terpisah dari Qwen: tanpa entri `pendingGenerations`, tanpa
   // stage/step, dan tanpa batas MAX_GLOBAL_GENERATIONS (endpoint CPU sendiri).
-  const handleRemoveBackground = useCallback(async (imageBase64: string) => {
+  // Label sumber hanya penanda riwayat: nama berkas unggahan bila ada, kalau
+  // tidak prompt item riwayat yang sedang dipilih (server menyaringnya lagi).
+  const handleRemoveBackground = useCallback(async (imageBase64: string, sourceLabel?: string) => {
     setIsRemovingBackground(true)
     try {
-      const newGen = await api.removeBackground(imageBase64)
+      const newGen = await api.removeBackground(imageBase64, sourceLabel ?? currentGen?.prompt)
       queryClient.setQueryData(['history', session.user.id], (old: Generation[] = []) => [newGen, ...old.filter(item => item.id !== newGen.id)])
       setCurrentGen(newGen)
       setIsViewingActiveGeneration(false)
@@ -285,7 +287,7 @@ export default function Dashboard({ session }: DashboardProps) {
     } finally {
       setIsRemovingBackground(false)
     }
-  }, [queryClient, session.user.id])
+  }, [queryClient, session.user.id, currentGen])
 
   // Delete Mutation
   const deleteMutation = useMutation({

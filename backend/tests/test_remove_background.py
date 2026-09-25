@@ -263,8 +263,10 @@ class RemoveBackgroundEndpointTest(unittest.TestCase):
     def _authenticate(self):
         main.app.dependency_overrides[require_user] = lambda: self.user_id
 
-    def _post(self, image: str, headers: dict | None = None):
-        return self.client.post("/api/remove-background", json={"image": image}, headers=headers or {})
+    def _post(self, image: str, headers: dict | None = None, **extra):
+        return self.client.post(
+            "/api/remove-background", json={"image": image, **extra}, headers=headers or {}
+        )
 
     def _successful_storage(self, insert_error: Exception | None = None):
         uploaded = {}
@@ -488,6 +490,48 @@ class RemoveBackgroundEndpointTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(main._generation_lock.locked())
 
+    def _posted_cutout(self, **extra):
+        """Post one image through the real endpoint and return the mocked insert."""
+        self._authenticate()
+        cutout = _png(Image.new("RGBA", (2, 2), (0, 0, 0, 0)))
+        _, upload, insert = self._successful_storage()
+        with patch.object(service, "remove_background_png", return_value=cutout), upload, insert as mocked_insert:
+            response = self._post(_encoded(_tiny_png()), **extra)
+        return response, mocked_insert
+
+    def test_source_label_is_appended_to_the_stored_prompt(self):
+        response, insert = self._posted_cutout(source_label="cocacola.jpg")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(insert.call_args.args[1], "Remove background — cocacola.jpg")
+        self.assertEqual(response.json()["prompt"], "Remove background — cocacola.jpg")
+
+    def test_source_label_controls_and_space_runs_are_cleaned_before_storage(self):
+        response, insert = self._posted_cutout(source_label="  cocacola\n\tsmall   bottle\x7f  ")
+
+        self.assertEqual(response.status_code, 200)
+        stored = insert.call_args.args[1]
+        self.assertEqual(stored, "Remove background — cocacola small bottle")
+        self.assertFalse(any(ord(ch) < 32 or ord(ch) == 127 for ch in stored))
+        self.assertNotIn("  ", stored)
+
+    def test_source_label_longer_than_the_cap_is_truncated_without_trailing_space(self):
+        response, insert = self._posted_cutout(source_label="x" * 79 + " " + "y" * 40)
+
+        self.assertEqual(response.status_code, 200)
+        label = insert.call_args.args[1].removeprefix("Remove background — ")
+        self.assertEqual(label, "x" * (main.MAX_SOURCE_LABEL_CHARS - 1))
+        self.assertFalse(label.endswith(" "))
+
+    def test_missing_or_blank_source_label_keeps_the_bare_prompt(self):
+        for extra in ({}, {"source_label": None}, {"source_label": "   \t\n  "}, {"source_label": "\u00a0"}):
+            with self.subTest(extra=extra):
+                response, insert = self._posted_cutout(**extra)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(insert.call_args.args[1], "Remove background")
+                self.assertEqual(response.json()["prompt"], "Remove background")
+
     def test_busy_worker_is_429_without_queuing(self):
         self._authenticate()
         started = threading.Event()
@@ -524,6 +568,31 @@ class RemoveBackgroundEndpointTest(unittest.TestCase):
         self.assertNotIn("error", first)
         self.assertEqual(first["response"].status_code, 200)
         self.assertEqual(worker.call_count, 1)
+
+
+class CleanSourceLabelTest(unittest.TestCase):
+    def test_none_and_blank_become_empty(self):
+        self.assertEqual(main._clean_source_label(None), "")
+        for raw in ("", "   ", "\t\n", "\u00a0\u00a0"):
+            self.assertEqual(main._clean_source_label(raw), "")
+
+    def test_control_characters_become_spaces(self):
+        self.assertEqual(main._clean_source_label("a\nb\tc"), "a b c")
+        self.assertEqual(main._clean_source_label("a\x00b\x7fc"), "a b c")
+
+    def test_whitespace_runs_collapse_to_one_space(self):
+        self.assertEqual(main._clean_source_label("  a \u00a0  b  "), "a b")
+
+    def test_truncation_caps_the_length_and_strips_a_trailing_space(self):
+        self.assertEqual(main._clean_source_label("y" * 500), "y" * main.MAX_SOURCE_LABEL_CHARS)
+        # 80 chars cut mid-label lands on a space, which strip removes again.
+        cleaned = main._clean_source_label("x" * 79 + " " + "y" * 40)
+        self.assertEqual(cleaned, "x" * (main.MAX_SOURCE_LABEL_CHARS - 1))
+        self.assertFalse(cleaned.endswith(" "))
+
+    def test_history_prompt_adds_the_em_dash_only_for_a_label(self):
+        self.assertEqual(main._history_prompt_for_cutout(""), "Remove background")
+        self.assertEqual(main._history_prompt_for_cutout("cocacola.jpg"), "Remove background — cocacola.jpg")
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ interface ImageCanvasProps {
   isRemovingBackground?: boolean
   modelStatus: ModelStatus
   onGenerate: (prompt: string, images?: string[], options?: GenerationOptions) => void
-  onRemoveBackground?: (imageBase64: string) => void | Promise<void>
+  onRemoveBackground?: (imageBase64: string, sourceLabel?: string) => void | Promise<void>
   pendingGenParams?: GenerationTimeParams
   genKey?: number
   isViewingActiveGeneration?: boolean

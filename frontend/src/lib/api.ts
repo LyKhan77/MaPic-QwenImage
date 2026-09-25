@@ -77,12 +77,16 @@ export const api = {
   },
 
   // Jalur CPU terpisah dari Qwen: satu gambar base64 tanpa prefix data-URL,
-  // hasilnya Generation baru di riwayat.
-  async removeBackground(image: string) {
+  // hasilnya Generation baru di riwayat. `sourceLabel` hanya nama tampilan yang
+  // dipakai server sebagai penanda baris riwayat, bukan validasi apa pun.
+  async removeBackground(image: string, sourceLabel?: string) {
+    const body: Record<string, unknown> = { image }
+    if (sourceLabel) body.source_label = sourceLabel
+
     const res = await fetch(`${API_URL}/remove-background`, {
       method: 'POST',
       headers: await authHeaders(true),
-      body: JSON.stringify({ image }),
+      body: JSON.stringify(body),
     })
 
     if (!res.ok) {

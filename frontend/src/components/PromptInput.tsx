@@ -18,7 +18,7 @@ export interface GenerationOptions {
 
 interface PromptInputProps {
   onGenerate: (prompt: string, images?: string[], options?: GenerationOptions) => void
-  onRemoveBackground?: (imageBase64: string) => void | Promise<void>
+  onRemoveBackground?: (imageBase64: string, sourceLabel?: string) => void | Promise<void>
   isLoading: boolean
   // Pekerjaan cutout bukan stage Qwen: dipisah agar label kirim jujur.
   isRemovingBackground?: boolean
@@ -37,7 +37,7 @@ interface PromptInputProps {
 export default function PromptInput({ onGenerate, onRemoveBackground, isLoading, isRemovingBackground = false, isCentralized, onTyping, initialPrompt, initialImageUrl, modelStatus, queueLength = 0, removeBg, onRemoveBgChange }: PromptInputProps) {
   const [prompt, setPrompt] = useState('')
   const [showReferences, setShowReferences] = useState(true)
-  const [images, setImages] = useState<{ id: string; base64: string }[]>([])
+  const [images, setImages] = useState<{ id: string; base64: string; name?: string }[]>([])
   const [showSettings, setShowSettings] = useState(false)
   const [steps, setSteps] = useState(40)
   const [cfgScale, setCfgScale] = useState(1.0)
@@ -149,7 +149,7 @@ export default function PromptInput({ onGenerate, onRemoveBackground, isLoading,
           reader.onerror = error => reject(error)
         })
 
-        newImages.push({ id: Math.random().toString(36).substring(7), base64 })
+        newImages.push({ id: Math.random().toString(36).substring(7), base64, name: file.name })
       }
       setImages(newImages)
     } finally {
@@ -171,7 +171,7 @@ export default function PromptInput({ onGenerate, onRemoveBackground, isLoading,
       if (submitLatchRef.current) return
       submitLatchRef.current = true
       try {
-        await onRemoveBackground(stripDataUrlPrefix(images[0].base64))
+        await onRemoveBackground(stripDataUrlPrefix(images[0].base64), images[0].name)
       } finally {
         submitLatchRef.current = false
       }

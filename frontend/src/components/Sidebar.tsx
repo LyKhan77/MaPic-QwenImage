@@ -1,7 +1,8 @@
-import { LogOut, Plus, Trash2, ChevronLeft, ChevronRight, MessageSquare, Menu, X } from 'lucide-react'
+import { LogOut, Plus, Trash2, ChevronLeft, ChevronRight, MessageSquare, Menu, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Generation } from '../types'
 import { cn } from '../lib/utils'
+import { filterHistory } from '../lib/historySearch'
 import { motion } from 'framer-motion'
 import type { Session } from '@supabase/supabase-js'
 import { useEffect, useState } from 'react'
@@ -22,6 +23,8 @@ export default function Sidebar({ session, history, onSelect, onNewChat, onDelet
   const [isMobile, setIsMobile] = useState(() => window.matchMedia(MOBILE_QUERY).matches)
   const [isCollapsedDesktop, setIsCollapsedDesktop] = useState(() => window.innerWidth < 768)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+  // Pencarian hanya atas array `history` yang sudah dimuat Dashboard.
+  const [query, setQuery] = useState('')
 
   useEffect(() => {
     const mq = window.matchMedia(MOBILE_QUERY)
@@ -36,6 +39,7 @@ export default function Sidebar({ session, history, onSelect, onNewChat, onDelet
 
   // The collapsed rail is a desktop-only affordance; on mobile the drawer is always full width.
   const isCollapsed = !isMobile && isCollapsedDesktop
+  const visibleHistory = filterHistory(history, query)
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -127,12 +131,29 @@ export default function Sidebar({ session, history, onSelect, onNewChat, onDelet
             </div>
           )}
 
-          {history.length === 0 ? (
+          {!isCollapsed && (
+            <div className="relative px-1 pb-2">
+              <Search
+                size={14}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search history"
+                aria-label="Search history"
+                className="w-full rounded-md bg-muted/30 py-3 pl-8 pr-3 text-sm text-foreground ring-1 ring-border placeholder:text-muted-foreground focus:outline-none focus:ring-primary/50"
+              />
+            </div>
+          )}
+
+          {visibleHistory.length === 0 ? (
               <div className={cn("p-4 text-center text-xs text-muted-foreground italic", isCollapsed && "hidden")}>
-                  No history yet.
+                  {history.length === 0 ? 'No history yet.' : 'No matches.'}
               </div>
           ) : (
-              history.map((item, i) => (
+              visibleHistory.map((item, i) => (
               <motion.div
                   key={item.id}
                   initial={{ opacity: 0, x: -10 }}
@@ -144,14 +165,14 @@ export default function Sidebar({ session, history, onSelect, onNewChat, onDelet
                     isCollapsed ? "justify-center p-3" : "justify-between p-3 w-full"
                   )}
                   onClick={() => handleSelect(item)}
-                  title={isCollapsed ? item.prompt : undefined}
+                  title={item.prompt}
               >
                   {isCollapsed ? (
                      <MessageSquare size={18} className={cn(currentId === item.id ? "text-primary" : "text-muted-foreground")} />
                   ) : (
                     <>
                       <div className="flex-1 overflow-hidden text-left">
-                          <span className="line-clamp-2 text-sm font-medium text-foreground block">
+                          <span className="truncate text-sm font-medium text-foreground block">
                           {item.prompt}
                           </span>
                           <span className="text-[10px] font-mono text-muted-foreground block mt-1">

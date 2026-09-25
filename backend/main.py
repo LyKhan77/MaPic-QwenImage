@@ -79,6 +79,26 @@ MAX_REMOVE_BACKGROUND_BYTES = 2 * 1024 * 1024
 MAX_REMOVE_BACKGROUND_SIDE = 2048
 MAX_REMOVE_BACKGROUND_PIXELS = 4_194_304
 REMOVE_BACKGROUND_PROMPT = "Remove background"
+MAX_SOURCE_LABEL_CHARS = 80
+
+
+def _clean_source_label(raw: str | None) -> str:
+    """Collapse a client-supplied label to one short, safe display line.
+
+    Tampilan saja: label ini tidak pernah dipakai untuk path penyimpanan, header,
+    query, atau nama berkas.
+    """
+    if not raw:
+        return ""
+    # Karakter kontrol bisa merusak tinggi baris di sidebar, bukan hanya \n dan \t.
+    flattened = "".join(" " if ord(ch) < 32 or ord(ch) == 127 else ch for ch in raw)
+    collapsed = " ".join(flattened.split())  # str.split() juga memecah U+00A0
+    return collapsed[:MAX_SOURCE_LABEL_CHARS].strip()
+
+
+def _history_prompt_for_cutout(label: str) -> str:
+    """Bentuk prompt riwayat cutout; tanpa label yang bisa dipakai, label lama."""
+    return f"{REMOVE_BACKGROUND_PROMPT} — {label}" if label else REMOVE_BACKGROUND_PROMPT
 
 
 def _can_accept_generation(active_generations: dict[str, dict]) -> bool:
@@ -273,7 +293,8 @@ async def remove_background(payload: RemoveBackgroundRequest, user_id: UUID = De
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     try:
-        return insert_generation(user_id, REMOVE_BACKGROUND_PROMPT, image_path, public_url)
+        prompt = _history_prompt_for_cutout(_clean_source_label(payload.source_label))
+        return insert_generation(user_id, prompt, image_path, public_url)
     except SupabaseError as exc:
         logger.exception("Supabase error during remove background insert")
         delete_stored_image(image_path)

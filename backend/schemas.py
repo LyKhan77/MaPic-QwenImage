@@ -21,6 +21,9 @@ class GenerateRequest(BaseModel):
 
 class RemoveBackgroundRequest(BaseModel):
     image: str  # base64 PNG atau JPEG, tanpa prefiks data-URL
+    # Label tampilan opsional untuk sumber cutout (mis. nama berkas) supaya baris
+    # riwayat tidak semuanya berbunyi sama. Server menyaringnya sebelum disimpan.
+    source_label: str | None = Field(default=None, max_length=200)
 
 
 class Generation(BaseModel):

@@ -31,5 +31,10 @@ export function removeBackgroundSendLabel(isBusy: boolean): string {
 }
 
 export function isCutoutGeneration(prompt?: string | null): boolean {
-  return prompt === REMOVE_BACKGROUND_LABEL
+  // Baris lama hanya punya label telanjang; yang baru menambahkan em dash + nama
+  // sumber, jadi deteksi berbasis prefiks dan bukan kesamaan persis.
+  return (
+    prompt === REMOVE_BACKGROUND_LABEL ||
+    (prompt ?? '').startsWith(`${REMOVE_BACKGROUND_LABEL} — `)
+  )
 }

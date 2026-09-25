@@ -246,6 +246,34 @@ Delete a generation record and its associated image from storage.
 
 ---
 
+### `POST /api/remove-background`
+Hapus latar satu gambar (PNG/JPEG) dan simpan hasil PNG transparan sebagai record riwayat baru. Jalur CPU terpisah dari Qwen; model Qwen yang `unloaded` tidak menghalangi endpoint ini.
+
+**Request body:**
+```json
+{
+  "image": "base64encodedstring",
+  "source_label": "cocacola.jpg"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `image` | `string` | Yes | Base64 PNG/JPEG tanpa prefiks data-URL. Maksimal 2 MiB setelah decode, sisi maksimal 2048 px. |
+| `source_label` | `string` | No | Label tampilan untuk sumber cutout (mis. nama berkas), maksimal 200 karakter di level skema. **Display only**: server menyaringnya (karakter kontrol → spasi, runtun spasi → satu spasi, dipotong 80 karakter) lalu menyimpannya sebagai `Remove background — <label>`. Label ini tidak pernah dipakai untuk path Storage, header, query, atau nama berkas, dan tidak boleh dipercaya sebagai data. Tanpa label yang bisa dibaca, prompt tersimpan tetap persis `Remove background` (baris lama di riwayat juga tetap berbunyi begitu). |
+
+**Response:** `Generation` dengan `prompt` = `Remove background` atau `Remove background — <label>`.
+
+**Errors:**
+- `401` — Token tidak ada/tidak valid.
+- `413` — Payload gambar terlalu besar.
+- `422` — Base64/format/dimensi tidak valid.
+- `429` — Worker cutout sedang sibuk.
+- `503` — Model cutout tidak tersedia.
+- `502` — Inferensi atau Supabase gagal.
+
+---
+
 ## Qwen-Image Server API (`http://localhost:30000`)
 
 > **Note:** These endpoints are consumed internally by the MaPic Backend. Frontend clients should not call them directly.

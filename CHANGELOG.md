@@ -5,6 +5,42 @@ setiap entri memuat konteks, daftar berkas yang berubah, bukti, dampak, dan cara
 
 > Catatan: berkas ini dibuat pada 2026-09-23. Commit-commit sebelumnya belum punya entri.
 
+### 2026-09-25 — `feat: label remove-background history items and search history`
+
+**Konteks.** Uji UI nyata menunjukkan setiap hasil Remove Background tersimpan dengan prompt riwayat
+yang sama persis, `Remove background`, sehingga sidebar menjadi dinding baris identik dan tidak ada
+yang bisa ditemukan kembali. Sidebar juga menampilkan sampai dua baris teks prompt mentah dan tidak
+punya pencarian. Keputusan yang disetujui: **tanpa migrasi DB** — kolom `prompt` yang sudah ada
+**dipakai ulang**, jenis hasil cutout tetap dikenali dari promptnya, dan nama sumber dijahit ke dalam
+string itu sebagai label tampilan.
+
+**Yang berubah.**
+
+| Berkas | Perubahan |
+|---|---|
+| `backend/schemas.py` | `RemoveBackgroundRequest` mendapat field opsional `source_label: str | None = Field(default=None, max_length=200)`. Input klien tidak dipercaya; penyaringan terjadi di server. |
+| `backend/main.py` | `MAX_SOURCE_LABEL_CHARS = 80` plus dua helper murni: `_clean_source_label` (karakter kontrol `ord < 32`/`127` → spasi, runtun spasi termasuk U+00A0 → satu spasi, potong ke 80 karakter lalu strip lagi) dan `_history_prompt_for_cutout` (satu-satunya tempat format `Remove background — <label>`, em dash U+2014). Dipakai di `insert_generation`. Label bersifat tampilan saja dan tidak pernah menjadi path/header/query/nama berkas. Status, urutan validasi, dan cleanup saat insert gagal tidak berubah. |
+| `frontend/src/lib/removeBackground.ts` | `isCutoutGeneration` mengenali label lama (persis) **dan** bentuk bersufiks lewat prefiks `'Remove background — '`, sehingga baris lama tetap dapat checkerboard. Tetap sumber tunggal untuk penanda cutout. |
+| `frontend/src/lib/historySearch.ts` | Baru. `filterHistory<T extends { prompt: string }>(items, query)` — trim query, kosong berarti tanpa filter, pencocokan substring tanpa peduli huruf besar/kecil, tidak memutasi input. |
+| `frontend/src/lib/api.ts` | `removeBackground(image, sourceLabel?)` menyertakan `source_label` di body hanya bila label tidak kosong. |
+| `frontend/src/components/PromptInput.tsx` | State gambar menjadi `{ id; base64; name? }`; `file.name` disimpan di jalur unggah manual (prefill riwayat tidak punya nama). Submit cutout mengirim `images[0].name`. Prop `onRemoveBackground` menjadi `(imageBase64, sourceLabel?)`. |
+| `frontend/src/components/ImageCanvas.tsx`, `frontend/src/pages/Dashboard.tsx` | Argumen kedua diteruskan apa adanya. `handleRemoveBackground(imageBase64, sourceLabel?)` memakai `sourceLabel ?? currentGen?.prompt`, jadi alur "pilih sumber dari riwayat" memberi label dari prompt item itu sendiri. Sisa jalur cutout tidak berubah (loading state sendiri, tanpa `pendingGenerations`, tanpa stage/antrean Qwen, insert cache riwayat di depan). |
+| `frontend/src/components/Sidebar.tsx` | Baris riwayat jadi satu baris `truncate` (bukan `line-clamp-2`) dengan `title={item.prompt}` di **semua** lebar, bukan hanya saat rail terlipat. Kotak pencarian `type="search"` + `aria-label="Search history"` + ikon `Search` (lucide) ditempatkan di atas daftar dan hanya tampil saat tidak terlipat. Filter jalan di klien atas prop `history`; hasil kosong menampilkan `No matches.`, bukan `No history yet.` Tidak ada dependensi baru. |
+| `backend/tests/test_remove_background.py` | Tes baru: prompt tersimpan dengan label, label berisi newline/tab/spasi ganda/karakter kontrol, label lebih panjang dari batas dipotong tanpa spasi di ujung, label tidak ada/`null`/hanya spasi tetap `Remove background`, plus unit test langsung `_clean_source_label` dan `_history_prompt_for_cutout`. |
+| `frontend/scripts/check-remove-background-ui.mjs` | Kasus `isCutoutGeneration` (label lama, bentuk bersufiks, kalimat lebih panjang, prompt pengguna lain) dan `filterHistory` (query kosong, hanya spasi, tanpa peduli huruf besar/kecil, tanpa hasil, input tidak berubah), plus penjaga statis bahwa label diteruskan dan sidebar satu baris + punya pencarian. |
+| `API.md` | Endpoint `POST /api/remove-background` didokumentasikan lengkap, termasuk field opsional `source_label` dan aturan penyaringannya. |
+
+**Bukti.**
+
+- `SUPABASE_URL=https://example.supabase.co SUPABASE_SERVICE_ROLE_KEY=test backend/.venv/bin/python -m unittest discover -s backend/tests` → `Ran 42 tests in 0.207s` `OK`.
+- `npm --prefix frontend run check:remove-background` → `stripDataUrlPrefix OK`, `canSubmitRemoveBackground 4 outcomes OK`, `isCutoutGeneration legacy + suffixed label OK`, `removeBackgroundSendLabel busy/idle OK`, `historySearch: filterHistory empty/case-insensitive/no-match/no-mutate OK`, `removeBg owned by Dashboard, forwarded to both inputs OK`, `source label threaded + sidebar one-line/search OK`.
+- `npm --prefix frontend run build` → `✓ 2221 modules transformed.` `dist/assets/index-Bx78qzT9.css 39.36 kB` `dist/assets/index-CDjm8U37.js 622.41 kB` `✓ built in 1.43s` (hanya peringatan chunk >500 kB yang sudah lama ada).
+- `npm --prefix frontend run lint` → `✖ 5 problems (5 errors, 0 warnings)`, sama seperti baseline branch ini; kelimanya pra-eksisting (`BearAnimation.tsx:27`, `GenerationStageBadge.tsx:25`/`:26`, `useGenerationStatus.ts:25`, `Login.tsx:45`).
+
+**Dampak.** Baris riwayat cutout kini bisa dibedakan (`Remove background — cocacola.jpg`) dan bisa dicari, sementara **tidak ada migrasi DB**: kolom `prompt` dipakai ulang, dan baris cutout lama tetap berbunyi persis `Remove background` serta tetap dikenali sebagai cutout oleh deteksi prefiks. `/api/generate`, auth, dan jalur Qwen tidak berubah. Label hanya memengaruhi teks riwayat; path Storage tetap memakai UUID seperti sebelumnya. Batas yang diketahui: label lebih panjang dari 80 karakter dipotong, dan pencarian hanya atas item riwayat yang sudah dimuat klien.
+
+**Rollback.** `git revert <sha>` mengembalikan prompt riwayat cutout ke satu nilai tetap dan melepas pencarian sidebar. Baris yang **sudah** tersimpan dengan label tetap memakai bentuk lama di riwayat; itu hanya teks tampilan, jadi tidak ada migrasi balik atau pembersihan data yang diperlukan.
+
 ### 2026-09-25 — `feat: mount cutout model directory into backend`
 
 **Konteks.** Endpoint `/api/remove-background` sengaja menolak mengunduh bobot saat request
