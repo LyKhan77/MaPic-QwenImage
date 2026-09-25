@@ -7,6 +7,26 @@ setiap entri memuat konteks, daftar berkas yang berubah, bukti, dampak, dan cara
 
 ---
 
+## 2026-09-25 — `feat: add CPU background removal worker`
+
+**Konteks.** Langkah pertama fitur Remove Background: worker inferensi lokal yang mengubah satu gambar menjadi PNG transparan baru. Inferensi tidak boleh menyentuh Qwen/ComfyUI dan tidak boleh mengunduh bobot diam-diam; endpoint HTTP, UI, serta mount volume bobot dikerjakan di task terpisah. Hasil pilot CPU (`isnet-general-use`, md5 `fc16ebd8b0c10d971d3513d564d01e29`) dipakai sebagai dasar ukuran dan waktu, bukan sebagai klaim mutu.
+
+**Yang berubah.**
+
+| Berkas | Perubahan |
+|---|---|
+| `backend/services/remove_background_service.py` | Baru. `MODEL_NAME = "isnet-general-use"`, `RemoveBackgroundError`, `ModelUnavailableError`, `remove_background_png(source: bytes) -> bytes`. Alur: Pillow buka → `ImageOps.exif_transpose` → `RGBA` → encode PNG → sesi `rembg` (satu per proses) → hasil dibuka `RGBA` → tolak ukuran berbeda → alpha = `ImageChops.darker(alpha sumber, alpha model)`, RGB diambil dari sumber → PNG lewat `BytesIO`. `rembg` diimpor di dalam `_session_factory`/`_extract` sehingga import modul tidak memicu unduhan. Sebelum sesi dibangun, keberadaan berkas bobot dicek di `REMBG_HOME` / `XDG_DATA_HOME/rembg` / `~/.rembg` (bentuk `models/<nama>/<nama>.onnx` atau bentuk lama `<home>/<nama>.onnx`); bila tidak ada, `ModelUnavailableError` dilempar tanpa percobaan jaringan. Checksum tidak pernah dinonaktifkan. |
+| `backend/tests/test_remove_background.py` | Baru. 7 tes `unittest` dengan `mock.patch` pada `_session_factory` dan `_extract`: mode/ukuran/tanda tangan PNG, RGB dari sumber, irisan alpha (sudut transparan tetap 0, alpha model 0 dan 120 dipertahankan), normalisasi EXIF orientation 6, bobot hilang → `ModelUnavailableError` tanpa membangun sesi, ukuran hasil berbeda → `RemoveBackgroundError`, sesi dipakai ulang lintas panggilan. |
+| `backend/requirements.txt` | Tambah `rembg[cpu]==2.0.85` (ONNX Runtime CPU, tanpa torch). |
+
+**Bukti.** `SUPABASE_URL=https://example.supabase.co SUPABASE_SERVICE_ROLE_KEY=test backend/.venv/bin/python -m unittest backend.tests.test_remove_background -v` → `Ran 7 tests ... OK`. `... -m unittest discover -s backend/tests -v` → `Ran 9 tests ... OK` (2 tes kapasitas lama tetap lulus). `backend/.venv/bin/python -m compileall -q backend` tanpa keluaran. Tes lulus tanpa `rembg` terpasang di `backend/.venv` dan tanpa jaringan. Berkas tes di-`git add -f` karena aturan ignore generik `tests/` (`.gitignore:34`); `git ls-files --error-unmatch backend/tests/test_remove_background.py` mencetak path-nya. Belum ada uji GPU, host, atau gambaran mutu pada commit ini.
+
+**Dampak.** Belum ada perubahan perilaku aplikasi: worker belum dipanggil endpoint mana pun. `backend/requirements.txt` menambah dependensi besar (~461 MB venv pada pilot), jadi rebuild image backend berikutnya memuat ONNX Runtime. Tidak ada perubahan skema DB, auth, Docker, atau frontend.
+
+**Rollback.** `git revert <sha>` menghapus worker, tes, dan entri requirements; tidak ada migrasi data atau artefak runtime yang perlu dibersihkan.
+
+---
+
 ## 2026-09-24 — `chore: abaikan spesifikasi dan rencana desain lokal`
 
 **Konteks.** Spesifikasi serta rencana kerja ialah catatan lokal, bukan dokumen yang dikomit. Commit rancangan sebelumnya keliru melacak satu spesifikasi.

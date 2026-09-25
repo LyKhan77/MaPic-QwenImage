@@ -6,3 +6,4 @@ python-dotenv
 pydantic
 Pillow
 pyjwt[crypto]
+rembg[cpu]==2.0.85
