@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import {
   REMOVE_BACKGROUND_LABEL,
   canSubmitRemoveBackground,
+  cutoutLabelFromPrompt,
   isCutoutGeneration,
   removeBackgroundSendLabel,
   stripDataUrlPrefix,
@@ -35,9 +36,23 @@ assert.equal(isCutoutGeneration(undefined), false)
 assert.equal(isCutoutGeneration(null), false)
 assert.equal(isCutoutGeneration(''), false)
 
+// Label sumber tidak boleh menumpuk prefiks cutout saat sumbernya hasil cutout
+// lain dari riwayat: prompt item itu sudah berbentuk label cutout.
+assert.equal(cutoutLabelFromPrompt(`${REMOVE_BACKGROUND_LABEL} — cocacola-can.png`), 'cocacola-can.png')
+assert.equal(cutoutLabelFromPrompt(REMOVE_BACKGROUND_LABEL), undefined)
+assert.equal(cutoutLabelFromPrompt('studio product shot'), 'studio product shot')
+assert.equal(cutoutLabelFromPrompt('Remove background of my photo'), 'Remove background of my photo')
+assert.equal(cutoutLabelFromPrompt(undefined), undefined)
+assert.equal(cutoutLabelFromPrompt(null), undefined)
+assert.equal(cutoutLabelFromPrompt(''), undefined)
+assert.equal(cutoutLabelFromPrompt(`${REMOVE_BACKGROUND_LABEL} — `), undefined)
+// Berkas unggahan nyata bukan label cutout; helper meneruskannya apa adanya.
+assert.equal(cutoutLabelFromPrompt('product.png'), 'product.png')
+
 assert.equal(removeBackgroundSendLabel(false), 'REMOVE BG')
 assert.equal(removeBackgroundSendLabel(true), 'REMOVING...')
 
+console.log('removeBackground: cutoutLabelFromPrompt de-chains cutout sources OK')
 console.log('removeBackground: stripDataUrlPrefix OK')
 console.log('removeBackground: canSubmitRemoveBackground 4 outcomes OK')
 console.log('removeBackground: isCutoutGeneration legacy + suffixed label OK')
@@ -95,7 +110,7 @@ const labelSignature = /onRemoveBackground\?: \(imageBase64: string, sourceLabel
 assert.match(promptInputSource, labelSignature)
 assert.match(imageCanvasSource, labelSignature)
 assert.match(dashboardSource, /handleRemoveBackground = useCallback\(async \(imageBase64: string, sourceLabel\?: string\)/)
-assert.match(dashboardSource, /sourceLabel \?\? currentGen\?\.prompt/)
+assert.match(dashboardSource, /sourceLabel \?\? cutoutLabelFromPrompt\(currentGen\?\.prompt\)/)
 assert.match(promptInputSource, /name: file\.name/)
 assert.match(promptInputSource, /images\[0\]\.name/)
 

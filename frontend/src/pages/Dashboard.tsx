@@ -17,6 +17,7 @@ import {
   hasGenerationWorkForUser,
   shouldShowActiveGenerationView,
 } from '../lib/activeGenerationState'
+import { cutoutLabelFromPrompt } from '../lib/removeBackground'
 
 interface DashboardProps {
   session: Session
@@ -272,10 +273,12 @@ export default function Dashboard({ session }: DashboardProps) {
   // stage/step, dan tanpa batas MAX_GLOBAL_GENERATIONS (endpoint CPU sendiri).
   // Label sumber hanya penanda riwayat: nama berkas unggahan bila ada, kalau
   // tidak prompt item riwayat yang sedang dipilih (server menyaringnya lagi).
+  // Prompt itu sendiri bisa sudah berupa label cutout, jadi dikupas dulu supaya
+  // label tidak menumpuk.
   const handleRemoveBackground = useCallback(async (imageBase64: string, sourceLabel?: string) => {
     setIsRemovingBackground(true)
     try {
-      const newGen = await api.removeBackground(imageBase64, sourceLabel ?? currentGen?.prompt)
+      const newGen = await api.removeBackground(imageBase64, sourceLabel ?? cutoutLabelFromPrompt(currentGen?.prompt))
       queryClient.setQueryData(['history', session.user.id], (old: Generation[] = []) => [newGen, ...old.filter(item => item.id !== newGen.id)])
       setCurrentGen(newGen)
       setIsViewingActiveGeneration(false)
