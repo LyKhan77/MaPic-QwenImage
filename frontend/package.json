@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "check:active-generations": "node --experimental-strip-types scripts/check-active-generation-state.mjs",
+    "check:remove-background": "node --experimental-strip-types scripts/check-remove-background-ui.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

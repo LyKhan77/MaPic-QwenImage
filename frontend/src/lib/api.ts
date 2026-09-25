@@ -76,6 +76,28 @@ export const api = {
     return res.json()
   },
 
+  // Jalur CPU terpisah dari Qwen: satu gambar base64 tanpa prefix data-URL,
+  // hasilnya Generation baru di riwayat.
+  async removeBackground(image: string) {
+    const res = await fetch(`${API_URL}/remove-background`, {
+      method: 'POST',
+      headers: await authHeaders(true),
+      body: JSON.stringify({ image }),
+    })
+
+    if (!res.ok) {
+        let errorMessage = 'Failed to remove background';
+        try {
+            const errorData = await res.json();
+            if (errorData.detail) errorMessage = errorData.detail;
+        } catch {
+            // ignore JSON parse error
+        }
+        throw new Error(errorMessage)
+    }
+    return res.json()
+  },
+
   async deleteHistory(id: string) {
     const res = await fetch(`${API_URL}/history/${id}`, {
       method: 'DELETE',

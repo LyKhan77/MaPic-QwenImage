@@ -1,8 +1,13 @@
 import { useState, type KeyboardEvent, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Send, Paperclip, X, ChevronDown, Settings2, Info } from 'lucide-react'
+import { Send, Paperclip, X, ChevronDown, Settings2, Info, Scissors } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ModelStatus } from '../lib/api'
+import {
+  canSubmitRemoveBackground,
+  removeBackgroundSendLabel,
+  stripDataUrlPrefix,
+} from '../lib/removeBackground'
 
 export interface GenerationOptions {
   num_inference_steps?: number
@@ -13,7 +18,10 @@ export interface GenerationOptions {
 
 interface PromptInputProps {
   onGenerate: (prompt: string, images?: string[], options?: GenerationOptions) => void
+  onRemoveBackground?: (imageBase64: string) => void | Promise<void>
   isLoading: boolean
+  // Pekerjaan cutout bukan stage Qwen: dipisah agar label kirim jujur.
+  isRemovingBackground?: boolean
   isCentralized?: boolean
   onTyping?: (isTyping: boolean) => void
   initialPrompt?: string
@@ -22,7 +30,7 @@ interface PromptInputProps {
   queueLength?: number
 }
 
-export default function PromptInput({ onGenerate, isLoading, isCentralized, onTyping, initialPrompt, initialImageUrl, modelStatus, queueLength = 0 }: PromptInputProps) {
+export default function PromptInput({ onGenerate, onRemoveBackground, isLoading, isRemovingBackground = false, isCentralized, onTyping, initialPrompt, initialImageUrl, modelStatus, queueLength = 0 }: PromptInputProps) {
   const [prompt, setPrompt] = useState('')
   const [showReferences, setShowReferences] = useState(true)
   const [images, setImages] = useState<{ id: string; base64: string }[]>([])
@@ -30,10 +38,20 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
   const [steps, setSteps] = useState(40)
   const [cfgScale, setCfgScale] = useState(1.0)
   const [negativePrompt, setNegativePrompt] = useState('')
+  const [removeBg, setRemoveBg] = useState(false)
+  const [isReadingFiles, setIsReadingFiles] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Cutout tidak mengosongkan lampiran seperti Generate, jadi klik ganda pada
+  // submit lambat harus dicegah eksplisit.
+  const submitLatchRef = useRef(false)
+  // Dinaikkan setiap pengguna mengubah pilihan gambar sendiri: prefill riwayat
+  // yang telat tidak boleh menimpa pilihan itu.
+  const manualSelectionVersionRef = useRef(0)
+  const prefillRequestRef = useRef(0)
 
   const isModelReady = modelStatus === 'ready' || modelStatus === undefined
   const isModelUnloaded = modelStatus === 'unloaded'
+  const cutoutReady = canSubmitRemoveBackground(images, isReadingFiles)
 
   useEffect(() => {
     if (initialPrompt) {
@@ -42,27 +60,43 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
       setPrompt('')
     }
 
-    if (initialImageUrl) {
-      const fetchImage = async () => {
-        try {
-          const res = await fetch(initialImageUrl)
-          const blob = await res.blob()
-          const base64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader()
-            reader.readAsDataURL(blob)
-            reader.onload = () => resolve(reader.result as string)
-            reader.onerror = error => reject(error)
-          })
-          setImages([{ id: 'rev-' + Math.random().toString(36).substring(7), base64 }])
-        } catch (error) {
-          console.error("Failed to load reference image", error)
-        }
-      }
-      fetchImage()
-    } else {
+    if (!initialImageUrl) {
       setImages([])
+      return
     }
+
+    const requestId = prefillRequestRef.current + 1
+    prefillRequestRef.current = requestId
+    const selectionVersion = manualSelectionVersionRef.current
+
+    const fetchImage = async () => {
+      try {
+        const res = await fetch(initialImageUrl)
+        const blob = await res.blob()
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.readAsDataURL(blob)
+          reader.onload = () => resolve(reader.result as string)
+          reader.onerror = error => reject(error)
+        })
+        // Penjaga: fetch riwayat bisa selesai setelah pengguna melampirkan
+        // gambarnya sendiri atau setelah initialImageUrl berganti lagi.
+        if (prefillRequestRef.current !== requestId) return
+        if (manualSelectionVersionRef.current !== selectionVersion) return
+        setImages([{ id: 'rev-' + Math.random().toString(36).substring(7), base64 }])
+      } catch (error) {
+        console.error("Failed to load reference image", error)
+      }
+    }
+    void fetchImage()
   }, [initialPrompt, initialImageUrl])
+
+  // Modal Settings tidak relevan untuk cutout: ditutup saat toggle dinyalakan,
+  // tombolnya disembunyikan, dan portal-nya dijaga `!removeBg`.
+  const toggleRemoveBg = () => {
+    setRemoveBg((prev) => !prev)
+    setShowSettings(false)
+  }
 
   useEffect(() => {
     if (!showSettings) return
@@ -84,43 +118,67 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
     const files = Array.from(e.target.files || [])
     if (!files.length) return
 
-    if (images.length + files.length > 10) {
+    manualSelectionVersionRef.current += 1
+
+    const selected = removeBg ? files.slice(0, 1) : files
+    if (removeBg && files.length > 1) {
+      alert('Remove Background uses one image. Only the first selected file was added.')
+    }
+
+    if (!removeBg && images.length + files.length > 10) {
       alert('You can only upload up to 10 images.')
       return
     }
 
-    const newImages = [...images]
-    for (const file of files) {
-      if (file.size > 2 * 1024 * 1024) {
-        alert(`File ${file.name} is larger than 2MB.`)
-        continue
+    setIsReadingFiles(true)
+    try {
+      const newImages = removeBg ? [] : [...images]
+      for (const file of selected) {
+        if (file.size > 2 * 1024 * 1024) {
+          alert(`File ${file.name} is larger than 2MB.`)
+          continue
+        }
+
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.readAsDataURL(file)
+          reader.onload = () => resolve(reader.result as string)
+          reader.onerror = error => reject(error)
+        })
+
+        newImages.push({ id: Math.random().toString(36).substring(7), base64 })
       }
-
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.readAsDataURL(file)
-        reader.onload = () => resolve(reader.result as string)
-        reader.onerror = error => reject(error)
-      })
-
-      newImages.push({ id: Math.random().toString(36).substring(7), base64 })
-    }
-    setImages(newImages)
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
+      setImages(newImages)
+    } finally {
+      setIsReadingFiles(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
     }
   }
 
   const removeImage = (id: string) => {
+    manualSelectionVersionRef.current += 1
     setImages(images.filter(img => img.id !== id))
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (removeBg) {
+      if (!onRemoveBackground || !canSubmitRemoveBackground(images, isReadingFiles).ok) return
+      if (submitLatchRef.current) return
+      submitLatchRef.current = true
+      try {
+        await onRemoveBackground(stripDataUrlPrefix(images[0].base64))
+      } finally {
+        submitLatchRef.current = false
+      }
+      return
+    }
+
     if (!prompt.trim() || !isModelReady) return
 
     const cleanImages = images.length > 0
-      ? images.map(img => img.base64.includes(',') ? img.base64.split(',')[1] : img.base64)
+      ? images.map(img => stripDataUrlPrefix(img.base64))
       : undefined;
 
     const options: GenerationOptions = {}
@@ -147,7 +205,7 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
     <div className={`w-full transition-all duration-500 ${isCentralized ? '' : 'border-t border-border bg-card/40 backdrop-blur-md p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:p-6'}`}>
       <div className={`mx-auto w-full relative space-y-2 ${isCentralized ? 'max-w-2xl' : 'max-w-4xl'}`}>
 
-        {!isCentralized && (!isModelReady || isModelUnloaded) && (
+        {!removeBg && !isCentralized && (!isModelReady || isModelUnloaded) && (
           <div className="absolute -top-8 left-1/2 right-1/2 flex items-center justify-center bg-destructive/90 backdrop-blur-sm py-1 px-3 rounded-lg z-50 whitespace-nowrap w-fit -translate-x-1/2">
             <span className="text-xs font-mono text-destructive-foreground">
               {modelStatus === 'loading' && 'Model loading...'}
@@ -174,47 +232,70 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
           />
           <button
              onClick={() => fileInputRef.current?.click()}
-             disabled={images.length >= 10 || !isModelReady}
+             disabled={removeBg ? images.length >= 1 || isReadingFiles : images.length >= 10 || !isModelReady}
              className={`flex shrink-0 items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-11 w-11 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-3 lg:p-2 text-muted-foreground hover:text-foreground'}`}
-             title="Attach reference image (Max 10, 2MB each)"
+             title={removeBg ? "Choose the image to cut out (1 image, 2MB)" : "Attach reference image (Max 10, 2MB each)"}
           >
              <Paperclip size={isCentralized ? 18 : 20} />
           </button>
 
           <input
             type="text"
-            value={prompt}
+            value={removeBg ? '' : prompt}
             onChange={(e) => handleChange(e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={() => onTyping && onTyping(false)}
-            placeholder={isCentralized ? "How can MaPic help you today?" : `Describe your imagination...`}
-            disabled={!isModelReady}
+            placeholder={removeBg ? "No prompt needed — just attach one image" : isCentralized ? "How can MaPic help you today?" : `Describe your imagination...`}
+            disabled={removeBg || !isModelReady}
             enterKeyHint="send"
             className={`min-w-0 flex-1 bg-transparent px-2 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50 ${isCentralized ? 'text-base py-3 px-4 md:text-lg' : ''}`}
           />
 
           <button
-            onClick={() => setShowSettings(!showSettings)}
-            disabled={!isModelReady}
-            className={`shrink-0 flex items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-11 w-11 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-3 lg:p-2 text-muted-foreground hover:text-foreground'} ${showSettings ? 'text-primary' : ''}`}
-            title="Generation settings"
+            type="button"
+            onClick={toggleRemoveBg}
+            aria-label="Remove Background"
+            aria-pressed={removeBg}
+            title={removeBg ? "Remove background is on: one image in, transparent PNG out. Click to go back to Generate." : "Remove background: cut out one image into a transparent PNG (no prompt needed)"}
+            className={`shrink-0 flex items-center justify-center transition-all ${isCentralized ? 'h-11 w-11 rounded-full' : 'min-h-11 min-w-11 p-3 lg:min-h-0 lg:min-w-0 lg:p-2'} ${removeBg ? 'bg-primary text-primary-foreground shadow-[inset_0_0_0_2px_hsl(var(--foreground))]' : 'text-muted-foreground hover:text-foreground'}`}
           >
-            <Settings2 size={isCentralized ? 18 : 20} />
+            <Scissors size={isCentralized ? 18 : 20} />
           </button>
+
+          {!removeBg && (
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              disabled={!isModelReady}
+              className={`shrink-0 flex items-center justify-center transition-all disabled:opacity-50 ${isCentralized ? 'h-11 w-11 rounded-full text-gray-400 hover:text-white hover:bg-white/10' : 'p-3 lg:p-2 text-muted-foreground hover:text-foreground'} ${showSettings ? 'text-primary' : ''}`}
+              title="Generation settings"
+            >
+              <Settings2 size={isCentralized ? 18 : 20} />
+            </button>
+          )}
 
           <button
             onClick={handleSubmit}
-            disabled={!prompt.trim() || !isModelReady}
+            disabled={removeBg ? !cutoutReady.ok || isRemovingBackground : !prompt.trim() || !isModelReady}
             className={`group shrink-0 flex items-center justify-center transition-all ${isCentralized ? 'h-11 w-11 rounded-full bg-white text-black hover:bg-primary disabled:bg-gray-600' : 'min-h-11 rounded-lg bg-foreground px-4 py-2 text-sm font-bold text-background hover:bg-primary hover:text-primary-foreground'}`}
           >
             {isCentralized ? <Send size={18} /> : (
                 <>
-                    <span className="hidden sm:inline">{isLoading ? `QUEUE (${queueLength + 1})` : 'GENERATE'}</span>
+                    <span className="hidden sm:inline">{removeBg ? removeBackgroundSendLabel(isRemovingBackground) : isLoading ? `QUEUE (${queueLength + 1})` : 'GENERATE'}</span>
                     <Send size={14} className="sm:ml-2 transition-transform group-hover:translate-x-1" />
                 </>
             )}
           </button>
         </div>
+
+        {removeBg && (
+          <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[10px] font-mono ${cutoutReady.ok ? 'text-muted-foreground' : 'text-destructive-foreground'}`}>
+            {isReadingFiles && <span>Reading image...</span>}
+            {cutoutReady.reason === 'no-image' && <span>Attach one image — the result is a transparent PNG.</span>}
+            {cutoutReady.reason === 'too-many' && (
+              <span>Remove Background uses one image. Remove {images.length - 1} attachment{images.length - 1 > 1 ? 's' : ''} to continue.</span>
+            )}
+          </div>
+        )}
 
         {/* Queue badge */}
         {queueLength > 0 && (
@@ -234,7 +315,7 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
             >
               <div className="flex items-center gap-2 font-mono">
                 <Paperclip size={14} />
-                <span>{images.length} Reference Image{images.length > 1 ? 's' : ''} attached</span>
+                <span>{images.length} {removeBg ? 'Source' : 'Reference'} Image{images.length > 1 ? 's' : ''} attached</span>
               </div>
               <ChevronDown size={16} className={`transition-transform duration-200 ${showReferences ? 'rotate-180' : ''}`} />
             </button>
@@ -246,7 +327,7 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
                     <img src={img.base64} alt="Reference" className="w-full h-full object-cover" />
                     <button
                       onClick={() => removeImage(img.id)}
-                      className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500"
+                      className={`absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 transition-opacity hover:bg-red-500 ${removeBg ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                     >
                       <X size={12} />
                     </button>
@@ -262,7 +343,7 @@ export default function PromptInput({ onGenerate, isLoading, isCentralized, onTy
             containing block untuk position:fixed sehingga modal terpotong. */}
         {createPortal(
           <AnimatePresence>
-          {showSettings && (
+          {showSettings && !removeBg && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}

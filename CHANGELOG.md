@@ -7,6 +7,36 @@ setiap entri memuat konteks, daftar berkas yang berubah, bukti, dampak, dan cara
 
 ---
 
+## 2026-09-25 — `feat: add remove background toggle to prompt input`
+
+**Konteks.** Langkah ketiga fitur Remove Background: satu toggle gunting di baris input yang mengubah Generate (Qwen) menjadi Remove Background (CPU). Satu tombol, bukan menu tiga mode; tidak ada Image Edit maupun masking. Toggle harus hidup saat model Qwen `unloaded` karena endpoint cutout tidak menyentuh ComfyUI. Sumber cutout tetap ada di riwayat setelah diproses: hasilnya record baru, bukan penimpa. Bobot model belum di-mount di container (Task 4), jadi di host endpoint masih 503 — UI sendiri sudah mengirim request yang benar.
+
+**Yang berubah.**
+
+| Berkas | Perubahan |
+|---|---|
+| `frontend/src/lib/removeBackground.ts` | Baru. Helper murni tanpa React: `REMOVE_BACKGROUND_LABEL`, `stripDataUrlPrefix`, `canSubmitRemoveBackground` (alasan `no-image`/`too-many`/`reading`, `reading` menang agar hanya satu pesan tampil), `removeBackgroundSendLabel`, `isCutoutGeneration`. |
+| `frontend/src/lib/api.ts` | Tambah `api.removeBackground(image)` — `authHeaders(true)`, `POST /remove-background`, body `{ image }`, `detail` backend diangkat ke `Error.message` dengan pola sama seperti `generateImage`. `generateImage` dan alur token tidak disentuh. |
+| `frontend/src/components/PromptInput.tsx` | State `removeBg` (default `false`) + tombol gunting (`type="button"`, `aria-label="Remove Background"`, `aria-pressed`, `title` deskriptif) tepat sebelum `Settings2`; aktif = `bg-primary` + cincin `inset` + `aria-pressed`, jadi terlihat tanpa hover dan tidak hanya warna. Saat on: input teks disabled dengan placeholder "No prompt needed", tombol Settings disembunyikan, portal modal dijaga `!removeBg`, banner "model sleeping" disembunyikan, lampiran dibatasi 1 (pilih >1 file → hanya file pertama, tanpa membuang lampiran lama), pesan instruksi saat 0 atau >1 gambar, label kirim `REMOVE BG`/`REMOVING...`. Submit cutout memanggil `onRemoveBackground(base64 tanpa prefix)` di bawah latch `useRef` dan tidak mengosongkan lampiran (sumber tetap tampil saat gagal). Saat off: perilaku lama utuh (prompt wajib, sampai 10 referensi, Enter, `GENERATE`). Perbaikan bug: efek `initialImageUrl` kini memakai penjaga versi (`prefillRequestRef` + `manualSelectionVersionRef`) sehingga fetch riwayat yang telat tidak menimpa gambar yang baru dilampirkan pengguna. Thumbnail hapus juga selalu terlihat saat toggle on agar pengguna bisa mengurangi ke satu gambar di layar sentuh. |
+| `frontend/src/pages/Dashboard.tsx` | Tambah `isRemovingBackground` + `handleRemoveBackground(imageBase64)`, terpisah dari `handleGenerate`: tanpa entri `pendingGenerations`, tanpa `pendingGenParams`/stage/step Qwen, tanpa `MAX_GLOBAL_GENERATIONS`. Sukses → `Generation` baru masuk ke depan cache `['history', session.user.id]`, `setCurrentGen`, toast. Gagal → toast pesan dari `detail` backend, tampilan tetap bisa dipakai. Handler diteruskan ke kedua pemakaian `<PromptInput>` (`ImageCanvas` terpusat dan bar bawah). Filter riwayat `selectGeneratedPngHistory` tidak diubah: hasil cutout PNG. |
+| `frontend/src/components/ImageCanvas.tsx` | Prop `isRemovingBackground`/`onRemoveBackground`. Selama cutout berjalan tampil loader dengan teks "Removing background..." (tanpa stage/step Qwen). Hasil cutout dideteksi murni dari label server lewat `isCutoutGeneration` dan digambar di atas latar kotak-kotak `repeating-conic-gradient`; komentar mencatat batas kosmetiknya (prompt Create buatan pengguna dengan teks persis sama ikut terkena). Tata letak, jarak, tombol unduh/salin tidak berubah. |
+| `frontend/scripts/check-remove-background-ui.mjs` | Baru. Cek Node polos + `assert` (gaya `check-active-generation-state.mjs`): strip prefix (PNG/JPEG/tanpa prefix/string kosong), empat hasil `canSubmitRemoveBackground`, `isCutoutGeneration` hanya benar untuk label persis (beda huruf besar, spasi tambahan, `undefined`, `null`, string kosong), label kirim busy/idle. |
+| `frontend/package.json` | Tambah satu skrip `check:remove-background`. Tanpa dependensi baru. |
+
+**Bukti.**
+
+- `npm --prefix frontend run check:remove-background` → `removeBackground: stripDataUrlPrefix OK` / `canSubmitRemoveBackground 4 outcomes OK` / `isCutoutGeneration exact-label-only OK` / `removeBackgroundSendLabel busy/idle OK`.
+- `npm --prefix frontend run build` → `✓ 2220 modules transformed.` `dist/assets/index-D1GHOhN_.css 39.39 kB` `dist/assets/index-ViG84PBD.js 621.36 kB` `✓ built in 1.50s` (hanya peringatan chunk >500 kB yang sudah lama ada).
+- `npm --prefix frontend run lint` → `✖ 5 problems (5 errors, 0 warnings)`. Baseline HEAD diukur ulang di worktree bersih: `✖ 8 problems (8 errors, 0 warnings)`. Jadi commit ini **menghapus 3 error lama**, tidak menambah: `PromptInput.tsx:40` (`initialPrompt` di effect) dan `Dashboard.tsx:95`/`:144` (setState di effect) sudah tidak ada setelah restrukturisasi. Sisa 5 error sepenuhnya pra-eksisting: `BearAnimation.tsx:27`, `GenerationStageBadge.tsx:25`/`:26`, `useGenerationStatus.ts:25`, `Login.tsx:45`. Tidak ada error di berkas yang disentuh commit ini.
+- `SUPABASE_URL=https://example.supabase.co SUPABASE_SERVICE_ROLE_KEY=test backend/.venv/bin/python -m unittest discover -s backend/tests` → `Ran 33 tests in 0.201s` `OK`.
+- `git diff --check` bersih. Belum ada verifikasi browser nyata pada commit ini (klik toggle, request tunggal, checkerboard, 320/390px) — itu dijalankan controller setelah ini, bukan diklaim di sini.
+
+**Dampak.** Tombol baru muncul di kedua baris input. Saat off tidak ada perubahan perilaku. Saat on, Generate tidak bisa dijalankan sampai toggle dimatikan, dan Settings Qwen disembunyikan. Satu cutout berjalan pada satu waktu (429 dari backend bila sibuk). Tidak ada perubahan skema DB, Docker, atau berkas backend. Selama bobot ONNX belum di-mount (Task 4), menekan kirim cutout menghasilkan toast error 503 dari backend; tampilan tetap bisa dipakai.
+
+**Rollback.** `git revert <sha>` menghapus toggle, handler, helper, skrip cek, dan entri ini; tidak ada migrasi data atau artefak runtime yang perlu dibersihkan.
+
+---
+
 ## 2026-09-25 — `feat: add remove-background endpoint`
 
 **Konteks.** Langkah kedua fitur Remove Background: endpoint HTTP yang menyambungkan worker CPU (Task 1) ke riwayat pengguna. Endpoint harus mandiri dari jalur Qwen — tidak memakai slot antrean, tidak memakai `_generation_lock`, tidak butuh model Qwen termuat — serta menolak input mahal sebelum inferensi. Batas angka, urutan validasi, dan pemetaan status mengikuti `docs/superpowers/specs/2026-09-25-remove-background-isnet-design.md`. Belum ada UI (Task 3) dan belum ada mount bobot di container (Task 4), jadi endpoint ini belum bisa menghasilkan cutout di host mana pun tanpa bobot lokal.

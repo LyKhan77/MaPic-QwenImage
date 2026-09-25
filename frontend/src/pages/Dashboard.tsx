@@ -45,6 +45,7 @@ export default function Dashboard({ session }: DashboardProps) {
   const [globalStage, setGlobalStage] = useState('idle')
   const [isViewingActiveGeneration, setIsViewingActiveGeneration] = useState(false)
   const [isNewGenerationDraft, setIsNewGenerationDraft] = useState(false)
+  const [isRemovingBackground, setIsRemovingBackground] = useState(false)
   const hadCurrentUserGenerationWorkRef = useRef(false)
   const completionSyncRequestIdRef = useRef(0)
   const pendingGenerationCount = Object.keys(pendingGenerations).length
@@ -264,6 +265,25 @@ export default function Dashboard({ session }: DashboardProps) {
       })
   }, [displayedGenerationCount, queryClient, session.user.id])
 
+  // Jalur cutout terpisah dari Qwen: tanpa entri `pendingGenerations`, tanpa
+  // stage/step, dan tanpa batas MAX_GLOBAL_GENERATIONS (endpoint CPU sendiri).
+  const handleRemoveBackground = useCallback(async (imageBase64: string) => {
+    setIsRemovingBackground(true)
+    try {
+      const newGen = await api.removeBackground(imageBase64)
+      queryClient.setQueryData(['history', session.user.id], (old: Generation[] = []) => [newGen, ...old.filter(item => item.id !== newGen.id)])
+      setCurrentGen(newGen)
+      setIsViewingActiveGeneration(false)
+      setIsNewGenerationDraft(false)
+      toast.success('Background removed')
+    } catch (error) {
+      console.error(error)
+      toast.error(error instanceof Error ? error.message : 'Failed to remove background')
+    } finally {
+      setIsRemovingBackground(false)
+    }
+  }, [queryClient, session.user.id])
+
   // Delete Mutation
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteHistory(id),
@@ -349,8 +369,10 @@ export default function Dashboard({ session }: DashboardProps) {
            <ImageCanvas
              currentGeneration={currentGen}
              isLoading={hasCurrentUserGenerationWork}
+             isRemovingBackground={isRemovingBackground}
              modelStatus={modelStatus}
              onGenerate={handleGenerate}
+             onRemoveBackground={handleRemoveBackground}
              pendingGenParams={displayedGenParams ?? undefined}
              genKey={genKey}
              isViewingActiveGeneration={isViewingCurrentUserActiveGeneration}
@@ -361,7 +383,9 @@ export default function Dashboard({ session }: DashboardProps) {
           <div className="shrink-0 w-full bg-background relative z-20">
             <PromptInput
               onGenerate={handleGenerate}
+              onRemoveBackground={handleRemoveBackground}
               isLoading={hasCurrentUserGenerationWork}
+              isRemovingBackground={isRemovingBackground}
               isCentralized={false}
               initialPrompt={!isViewingActiveGeneration ? currentGen.prompt : undefined}
               initialImageUrl={!isViewingActiveGeneration ? currentGen.public_url : undefined}

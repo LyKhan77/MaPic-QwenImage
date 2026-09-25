@@ -10,20 +10,27 @@ import type { GenerationOptions } from './PromptInput'
 import { useState } from 'react'
 import { useGenerationStatus } from '../hooks/useGenerationStatus'
 import GenerationTimeDisplay from './GenerationTimeDisplay'
+import { isCutoutGeneration } from '../lib/removeBackground'
 
 interface ImageCanvasProps {
   currentGeneration: Generation | null
   isLoading: boolean
+  isRemovingBackground?: boolean
   modelStatus: ModelStatus
   onGenerate: (prompt: string, images?: string[], options?: GenerationOptions) => void
+  onRemoveBackground?: (imageBase64: string) => void | Promise<void>
   pendingGenParams?: GenerationTimeParams
   genKey?: number
   isViewingActiveGeneration?: boolean
 }
 
-export default function ImageCanvas({ currentGeneration, isLoading, modelStatus, onGenerate, pendingGenParams, genKey, isViewingActiveGeneration = true }: ImageCanvasProps) {
+export default function ImageCanvas({ currentGeneration, isLoading, isRemovingBackground = false, modelStatus, onGenerate, onRemoveBackground, pendingGenParams, genKey, isViewingActiveGeneration = true }: ImageCanvasProps) {
   const [isTyping, setIsTyping] = useState(false)
   const generationStatus = useGenerationStatus(isLoading)
+  // Deteksi hasil cutout dari label prompt server (tidak ada kolom DB baru) —
+  // kosmetik belaka: prompt Create buatan pengguna dengan teks persis ini juga
+  // akan menampilkan latar kotak-kotak.
+  const isCutout = isCutoutGeneration(currentGeneration?.prompt)
 
   const handleDownload = async () => {
     if (!currentGeneration?.public_url) return
@@ -79,7 +86,21 @@ export default function ImageCanvas({ currentGeneration, isLoading, modelStatus,
       {/* Content */}
       <div className="relative z-10 flex h-full w-full flex-col items-center justify-center">
         <AnimatePresence mode="wait">
-          {isLoading && !currentGeneration && isViewingActiveGeneration ? (
+          {isRemovingBackground ? (
+            <motion.div
+              key="cutout"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col items-center gap-4"
+            >
+              <div className="relative h-36 w-36">
+                <Loader />
+              </div>
+              {/* Bukan stage Qwen: tidak ada step/estimasi yang bisa dilaporkan. */}
+              <p className="font-mono text-sm text-primary animate-pulse mt-8 h-5">Removing background...</p>
+            </motion.div>
+          ) : isLoading && !currentGeneration && isViewingActiveGeneration ? (
             <motion.div 
               key="loading"
               initial={{ opacity: 0 }}
@@ -145,7 +166,7 @@ export default function ImageCanvas({ currentGeneration, isLoading, modelStatus,
               initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
               transition={{ duration: 0.5 }}
-              className="group relative flex h-full max-h-[70vh] max-w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-card/50 shadow-2xl p-4"
+              className={`group relative flex h-full max-h-[70vh] max-w-full items-center justify-center overflow-hidden rounded-lg border border-border shadow-2xl p-4 ${isCutout ? 'bg-[repeating-conic-gradient(#4b5563_0_25%,#1f2937_0_50%)] bg-[length:16px_16px]' : 'bg-card/50'}`}
             >
               <img 
                 src={currentGeneration.public_url} 
@@ -195,7 +216,9 @@ export default function ImageCanvas({ currentGeneration, isLoading, modelStatus,
                
                <PromptInput
                   onGenerate={onGenerate}
+                  onRemoveBackground={onRemoveBackground}
                   isLoading={isLoading}
+                  isRemovingBackground={isRemovingBackground}
                   isCentralized={true}
                   onTyping={setIsTyping}
                   modelStatus={modelStatus}
