@@ -76,6 +76,11 @@ services:
     environment:
       QWEN_IMAGE_API_URL: http://qwen-image:30000
       QWEN_DEFAULT_RESOLUTION: "1024"
+      # Model cutout dibaca dari disk, tidak diunduh saat request. Layout di
+      # dalam mount harus <REMBG_HOME>/models/<nama>/<nama>.onnx.
+      REMBG_HOME: /models
+    volumes:
+      - ${CUTOUT_MODELS_DIR:-/home/gspe-ai2/apps/mapic-rembg}:/models:ro
     ports:
       - "8281:8000"
     depends_on:

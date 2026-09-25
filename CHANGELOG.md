@@ -5,6 +5,27 @@ setiap entri memuat konteks, daftar berkas yang berubah, bukti, dampak, dan cara
 
 > Catatan: berkas ini dibuat pada 2026-09-23. Commit-commit sebelumnya belum punya entri.
 
+### 2026-09-25 — `feat: mount cutout model directory into backend`
+
+**Konteks.** Endpoint `/api/remove-background` sengaja menolak mengunduh bobot saat request
+(lihat entri endpoint). Bobot ONNX karena itu harus tersedia di disk dan terlihat oleh container
+backend. Pola yang sama sudah dipakai untuk Qwen: berkas model tinggal di host, tidak dibakar ke image.
+
+**Yang berubah.**
+
+| Berkas | Perubahan |
+|---|---|
+| `deploy/docker/docker-compose.yml` | Layanan `backend` mendapat `REMBG_HOME=/models` dan volume read-only `${CUTOUT_MODELS_DIR:-/home/gspe-ai2/apps/mapic-rembg}:/models`. Folder host harus berbentuk `models/isnet-general-use/isnet-general-use.onnx` agar cocok dengan resolusi `rembg`. |
+
+**Bukti.** Bobot yang dipakai untuk uji lokal berukuran 178.648.008 byte dengan md5
+`fc16ebd8b0c10d971d3513d564d01e29`, sama dengan nilai yang di-pin `rembg` 2.0.85.
+Belum ada verifikasi di host; sifatnya perubahan konfigurasi.
+
+**Dampak.** Tanpa folder bobot, endpoint cutout mengembalikan 503 dan jalur Generate tetap normal.
+Menambah mount read-only tidak mengubah izin tulis container backend.
+
+**Rollback.** `git revert <sha>` lalu `docker compose up -d --no-deps backend`.
+
 ---
 
 ## 2026-09-25 — `fix: keep remove-background mode across prompt input views`
