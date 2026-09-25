@@ -7,6 +7,28 @@ setiap entri memuat konteks, daftar berkas yang berubah, bukti, dampak, dan cara
 
 ---
 
+## 2026-09-25 — `feat: add remove-background endpoint`
+
+**Konteks.** Langkah kedua fitur Remove Background: endpoint HTTP yang menyambungkan worker CPU (Task 1) ke riwayat pengguna. Endpoint harus mandiri dari jalur Qwen — tidak memakai slot antrean, tidak memakai `_generation_lock`, tidak butuh model Qwen termuat — serta menolak input mahal sebelum inferensi. Batas angka, urutan validasi, dan pemetaan status mengikuti `docs/superpowers/specs/2026-09-25-remove-background-isnet-design.md`. Belum ada UI (Task 3) dan belum ada mount bobot di container (Task 4), jadi endpoint ini belum bisa menghasilkan cutout di host mana pun tanpa bobot lokal.
+
+**Yang berubah.**
+
+| Berkas | Perubahan |
+|---|---|
+| `backend/schemas.py` | Tambah `RemoveBackgroundRequest(image: str)`. Tidak ada field `user_id`: identitas tetap dari token. |
+| `backend/main.py` | Tambah `POST /api/remove-background` (`Depends(require_user)`, `response_model=Generation`). Urutan penjagaan: auth → `len(image) > 2_800_000` karakter → `base64.b64decode(validate=True)` → `len(raw) > 2 MiB` → Pillow `open`/`load` → `format in {PNG, JPEG}` → `width/height <= 0`, sisi > 2048, atau piksel > 4_194_304 → lock → inferensi. Pemetaan kegagalan: 413 (2×), 422 (4×), 429 (worker sibuk), 503 (`ModelUnavailableError`), 502 (`RemoveBackgroundError`), 502 (Supabase). Pesan 503 sengaja dirampat karena pesan worker memuat path bobot lokal; kekecualiannya dicatat `logger.exception` di server. Sukses: `await asyncio.to_thread(remove_background_service.remove_background_png, raw)` → `upload_image` → `insert_generation(user_id, "Remove background", …)`. Lock baru `_remove_background_lock` (satu slot, komentar `ponytail:` menjelaskan batas ~3 GiB sesi) diperiksa `locked()` sebelum `async with` supaya permintaan kedua dapat 429, bukan ikut mengantre. `_remove_background_lock` tidak pernah disentuh `/api/generate`, dan endpoint ini tidak menyentuh `_active_generations`/`MAX_GLOBAL_GENERATIONS`. |
+| `backend/services/supabase_service.py` | Tambah `delete_stored_image(image_path) -> None` — best-effort `storage.remove([path])`, hanya gagal dicatat `logger.exception`. Dipakai endpoint ini **hanya** saat insert gagal setelah upload sukses, sehingga tidak ada berkas yatim di bucket. Sumber asli tidak pernah dihapus: endpoint ini tidak menyimpannya sama sekali. |
+| `backend/tests/test_remove_background.py` | Tambah 21 tes endpoint (total 31 di berkas ini) dengan `TestClient`, override `require_user`, dan `unittest.mock.patch` pada `backend.main.upload_image`, `backend.main.insert_generation`, `backend.main.delete_stored_image`, serta `remove_background_service.remove_background_png` — tanpa inferensi, jaringan, atau database. Cakupan: 401 tanpa header dan dengan token palsu (tanpa override), 413 (string base64 terlalu panjang, byte hasil dekode > 2 MiB), 422 (base64 rusak, payload bukan gambar, BMP, GIF, PNG ber-IHDR 0×0, sisi 2049, piksel 2048×2049), 503, 502 worker, 502 insert (+ `delete_stored_image` dipanggil tepat sekali dengan path hasil upload), 502 upload (cleanup tidak dipanggil, insert tidak dipanggil), 200 dengan label `Remove background` dan byte tersimpan benar-benar PNG RGBA, 200 saat `generate_image_bytes` dipatch melempar `AssertionError` dan `get_health_status` mengembalikan `unloaded` (jalur Qwen tidak tersentuh), `_generation_lock` tetap terbuka setelah sukses, 429 saat lock dipakai. Tes 429 memakai `threading.Event` (worker pertama menahan, worker kedua dicek dari thread utama), bukan polling `time.sleep`. `TestClient` dibuat sekali di `setUpModule` karena `asyncio.Lock` modul terikat ke satu event loop. |
+| `CHANGELOG.md` | Entri ini. |
+
+**Bukti.** `SUPABASE_URL=https://example.supabase.co SUPABASE_SERVICE_ROLE_KEY=test backend/.venv/bin/python -m unittest backend.tests.test_remove_background -v` → `Ran 31 tests ... OK`. `... -m unittest discover -s backend/tests -v` → `Ran 33 tests ... OK` (2 tes kapasitas lama tetap lulus). `backend/.venv/bin/python -m compileall -q backend` tanpa keluaran. `git diff --check` bersih. Tes RED dijalankan lebih dulu dan gagal karena route belum ada (`404 != 413`, `404 != 502`, `404 != 422`, `404 != 200`, `AttributeError: backend.main has no attribute 'delete_stored_image'`; 18 failure + 2 error) sebelum implementasi. Mutasi penjaga 429 (blok `locked()` dihapus sementara) membuat `test_busy_worker_is_429_without_queuing` gagal `200 != 429`, jadi penjaga itu memang yang diuji. Tes lulus tanpa `rembg` di `backend/.venv` dan tanpa jaringan; belum ada uji GPU, host, bobot nyata, mutu alpha, atau UI.
+
+**Dampak.** Endpoint baru belum dipakai UI, jadi perilaku aplikasi bagi pengguna belum berubah. `/api/generate`, auth, skema DB, Docker, dan frontend tidak disentuh. Satu permintaan cutout pada satu waktu per proses backend; permintaan bersamaan menerima 429 dan tidak mengantre. Belum ada penjagaan laju per pengguna — ponytail: tambahkan bila penyalahgunaan terbukti.
+
+**Rollback.** `git revert <sha>` menghapus endpoint, model request, helper cleanup, dan tesnya; tidak ada migrasi data, tabel, atau artefak runtime yang perlu dibersihkan.
+
+---
+
 ## 2026-09-25 — `feat: add CPU background removal worker`
 
 **Konteks.** Langkah pertama fitur Remove Background: worker inferensi lokal yang mengubah satu gambar menjadi PNG transparan baru. Inferensi tidak boleh menyentuh Qwen/ComfyUI dan tidak boleh mengunduh bobot diam-diam; endpoint HTTP, UI, serta mount volume bobot dikerjakan di task terpisah. Hasil pilot CPU (`isnet-general-use`, md5 `fc16ebd8b0c10d971d3513d564d01e29`) dipakai sebagai dasar ukuran dan waktu, bukan sebagai klaim mutu.

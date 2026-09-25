@@ -1,4 +1,5 @@
 import io
+import logging
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -9,6 +10,8 @@ try:
 except ModuleNotFoundError:
     from config import SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL
 
+
+logger = logging.getLogger("mapic")
 
 BUCKET_NAME = "generated_images"
 
@@ -107,6 +110,15 @@ def insert_generation(user_id: UUID, prompt: str, image_path: str, public_url: s
         return data[0]
 
     return data
+
+
+def delete_stored_image(image_path: str) -> None:
+    """Best-effort removal of a previously uploaded file (used when a later step fails)."""
+    try:
+        supabase.storage.from_(BUCKET_NAME).remove([image_path])
+    except Exception:
+        # The orphan is the only trace left of this file, so keep it in the log.
+        logger.exception("Failed to remove orphaned upload %s", image_path)
 
 
 def fetch_history(user_id: UUID) -> list[dict]:

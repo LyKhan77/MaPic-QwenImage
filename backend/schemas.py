@@ -19,6 +19,10 @@ class GenerateRequest(BaseModel):
     resolution: Literal[1024, 2048] = QWEN_DEFAULT_RESOLUTION
 
 
+class RemoveBackgroundRequest(BaseModel):
+    image: str  # base64 PNG atau JPEG, tanpa prefiks data-URL
+
+
 class Generation(BaseModel):
     id: UUID
     user_id: UUID
