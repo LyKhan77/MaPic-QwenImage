@@ -19,6 +19,8 @@ Bobot cutout Remove Background juga tinggal di host, terpisah dari model Qwen:
 
 Folder itu di-mount read-only ke container `backend` sebagai `/models` (`REMBG_HOME=/models`). Tanpa folder tersebut, endpoint cutout mengembalikan `503` sementara jalur Generate tetap normal. Unduhan otomatis saat request sengaja dimatikan.
 
+> **Lisensi bobot cutout — INTERNAL USE ONLY.** Bobot `isnet-general-use.onnx` tidak punya pernyataan lisensi (repo DIS ber-Apache-2.0 hanya untuk kode/metrik; dataset DIS5K non-komersial; issue [#150](https://github.com/xuebinqin/DIS/issues/150) masih terbuka). Jangan commit bobot, jangan bakar ke image, jangan distribusikan ke server klien, dan jangan pakai untuk pekerjaan komersial sampai izin tertulis ada atau model diganti ke yang berlisensi jelas.
+
 ## Struktur folder model
 
 ComfyUI memindai folder berdasarkan `comfyui/extra_model_paths.yaml`. Tata letak yang diharapkan:

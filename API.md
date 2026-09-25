@@ -249,6 +249,8 @@ Delete a generation record and its associated image from storage.
 ### `POST /api/remove-background`
 Hapus latar satu gambar (PNG/JPEG) dan simpan hasil PNG transparan sebagai record riwayat baru. Jalur CPU terpisah dari Qwen; model Qwen yang `unloaded` tidak menghalangi endpoint ini.
 
+> **INTERNAL USE ONLY.** Endpoint ini memakai bobot `isnet-general-use.onnx` yang tidak memiliki pernyataan lisensi (repo DIS ber-Apache-2.0 hanya untuk kode/metrik; dataset DIS5K non-komersial; issue [#150](https://github.com/xuebinqin/DIS/issues/150) belum terjawab). Jangan dipakai untuk pekerjaan komersial atau didistribusikan sampai lisensi diselesaikan atau model diganti.
+
 **Request body:**
 ```json
 {
