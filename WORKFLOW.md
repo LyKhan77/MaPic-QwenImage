@@ -86,8 +86,9 @@ Model dimuat ulang setiap kali container `comfyui` restart — termasuk setelah 
 |---|---|---|
 | Generasi bersamaan | 1 | Job berikutnya `queued` |
 | Antrean global | 10 job | HTTP **429** dengan pesan yang jelas |
-| Referensi per request | 10 | Validasi request menolak |
-| Resolusi | 1024 | HTTP **400** (bukan OOM) |
+| Cutout Remove Background bersamaan | 1 per proses backend, lock sendiri | HTTP **429** tanpa masuk antrean Qwen |
+| Referensi per request | 10 (Create) / 1 (Remove Background) | Validasi request menolak |
+| Resolusi | 1024 untuk Generate; cutout mengikuti ukuran sumber, sisi maksimal 2048 px | HTTP **400** (bukan OOM) untuk Generate; 422 untuk cutout |
 
 Validasi request terjadi **sebelum** job masuk antrean. Jadi request yang salah bentuk tidak "memakan" slot antrean dan tidak membuat pengguna lain menunggu lebih lama.
 
@@ -100,6 +101,8 @@ Validasi request terjadi **sebelum** job masuk antrean. Jadi request yang salah 
 3. Menghapus item riwayat menghapus **objek storage lebih dulu**, baru baris database — supaya tidak ada baris yang menunjuk ke gambar yang sudah hilang.
 
 Catatan: endpoint hapus saat ini bekerja berdasarkan `id` saja tanpa memverifikasi pemiliknya. Lihat "Notes And Gaps" di `database-schema.md`.
+
+**Label riwayat cutout.** Hasil Remove Background menyimpan judul di kolom `prompt` yang sama: `Remove background` atau `Remove background — <nama sumber>`. Nama sumber berasal dari nama berkas unggahan, atau dari prompt gambar sumber bila pengguna memilihnya dari riwayat (prefiks cutout dilepas agar tidak berantai). Server membersihkan label (karakter kontrol → spasi, spasi dirapatkan, dipotong 80 karakter) dan menyimpannya sebagai **tampilan saja** — tidak pernah dipakai untuk path Storage, header, atau nama berkas. Tidak ada kolom baru, jadi baris lama tetap terbaca apa adanya.
 
 ---
 

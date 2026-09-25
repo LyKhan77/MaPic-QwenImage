@@ -47,7 +47,7 @@ Seluruh stack berjalan sebagai **empat container Docker** di satu server (`gspe-
 | Komponen | Bahasa / Basis | Tanggung jawab | Yang **tidak** dilakukannya |
 |---|---|---|---|
 | **frontend** | React + Vite, disajikan nginx | UI kanvas, riwayat, modal settings, indikator antrean; memegang sesi Supabase Auth | Tidak memanggil ComfyUI atau facade; tidak menyimpan rahasia |
-| **backend** | FastAPI | Auth via sesi pengguna, validasi request, antrean + lock generasi, unggah hasil ke Supabase, riwayat, hapus | Tidak tahu apa itu node ComfyUI |
+| **backend** | FastAPI | Auth via sesi pengguna, validasi request, antrean + lock generasi, unggah hasil ke Supabase, riwayat, hapus; juga menjalankan **worker cutout CPU** (`rembg` + `isnet-general-use`) di jalur terpisah dari antrean Qwen | Tidak tahu apa itu node ComfyUI; jalur cutout tidak menyentuh GPU maupun facade |
 | **qwen-image** (facade) | FastAPI, tanpa torch | Menerjemahkan kontrak API lama menjadi graph ComfyUI; meneruskan progres per node; warmup saat load | Tidak menyentuh Supabase; tidak menyimpan state gambar |
 | **comfyui** | ComfyUI + ComfyUI-GGUF | Menjalankan model, mengelola VRAM, menyimpan hasil ke disk container | Tidak tahu apa pun tentang pengguna, riwayat, atau prompt produk |
 | **Supabase** | Layanan eksternal | Auth, Postgres (`generations`), Storage (PNG publik) | Tidak terlibat dalam inference |

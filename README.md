@@ -9,6 +9,8 @@ MaPic turns text prompts and reference images into production-quality visuals wi
 *   **AI Image Generation:** Generate images with Qwen-Image 2.1 (7B single-stream DiT + Qwen3-VL encoder) via ComfyUI + GGUF Q8_0.
 *   **Multi-Reference Support:** Attach up to 10 reference images for image-to-image generation, style transfer, editing, and identity-preserving workflows.
 *   **Transparent Output:** Menghasilkan RGBA dengan latar transparan. Output dikunci di **1K (1024×1024)** — 2K tidak muat di VRAM 16 GB.
+*   **Remove Background (CPU):** Tombol gunting di prompt bar memotong latar **satu** gambar menjadi PNG transparan baru, tanpa prompt dan tanpa menyentuh GPU Qwen — model yang `unloaded` tetap bisa dipakai. Berjalan lokal lewat `rembg` + ONNX `isnet-general-use`; objek buram berlatar bersih hasilnya bagus, objek bening seperti kaca/es belum. Hasil tersimpan sebagai item riwayat baru berlabel `Remove background — <nama sumber>`, dan sidebar punya kotak pencarian.
+*   **History Search:** Kotak pencarian di sidebar menyaring riwayat di klien; judul baris dipotong satu baris dengan teks penuh tersedia lewat tooltip.
 *   **Berjalan di jaringan kantor:** Frontend, backend, dan inference semuanya container Docker di satu server. Tidak ada dependensi ke Vercel atau tunnel.
 *   **Local GPU Inference:** The Qwen-Image 2.1 server runs locally on CUDA GPUs with no cloud inference cost or rate limit.
 *   **Model Load Controls:** The UI can load and unload the model. The inference server also unloads from VRAM after 1 hour of inactivity.

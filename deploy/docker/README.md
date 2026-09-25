@@ -11,6 +11,14 @@ Empat layanan, masing-masing satu folder dengan Dockerfile sendiri:
 
 Model tetap tinggal di host (`~/apps/qwen21-gguf`) dan di-mount read-only. Mengganti kuantisasi cukup dengan menukar file di folder itu, tanpa build ulang.
 
+Bobot cutout Remove Background juga tinggal di host, terpisah dari model Qwen:
+
+```
+~/apps/mapic-rembg/models/isnet-general-use/isnet-general-use.onnx
+```
+
+Folder itu di-mount read-only ke container `backend` sebagai `/models` (`REMBG_HOME=/models`). Tanpa folder tersebut, endpoint cutout mengembalikan `503` sementara jalur Generate tetap normal. Unduhan otomatis saat request sengaja dimatikan.
+
 ## Struktur folder model
 
 ComfyUI memindai folder berdasarkan `comfyui/extra_model_paths.yaml`. Tata letak yang diharapkan:

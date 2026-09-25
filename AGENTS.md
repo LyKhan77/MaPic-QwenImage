@@ -18,6 +18,8 @@ project references :
 - **GPU:** dipin ke **device 1** lewat `runtime: nvidia` + `NVIDIA_VISIBLE_DEVICES=1`. GPU 0 sengaja tidak dipakai karena pernah lepas dari bus PCIe (Xid 79/154). Docker di server memakai CDI yang vendor spec-nya belum lengkap, jadi jalur `runtime:` dipilih agar tidak perlu restart daemon — restart akan mematikan seluruh container project lain di server itu.
 - **Batas resolusi:** `QWEN_MAX_RESOLUTION=1024`. 2K tidak muat: sisa VRAM hanya ~2,5 GiB sementara 2048² punya 4× token latent.
 - **Performa terukur (1K, 40 step):** T2I 32–34 s · CFG 2.0 63 s · I2I 1 referensi 50 s · I2I 3 referensi 84 s · VRAM puncak ~13,7 GB di **satu** kartu.
+- **Remove Background (CPU, 2026-09-25):** tombol gunting tunggal di prompt bar (di samping ikon Settings) — mati = Generate seperti biasa, hidup = potong latar **satu** gambar tanpa prompt. Jalur inferensi **terpisah sepenuhnya** dari Qwen/GPU: library `rembg` + ONNX `isnet-general-use` berjalan di CPU di container `backend`, jadi model Qwen `unloaded` maupun GPU sibuk tidak menghalangi. Terukur di container server: panggilan pertama 0,89 s lalu 0,39 s untuk 512², RSS ~2,0 GiB, RGB subjek diambil dari gambar sumber (bukan dari model), dan keluaran identik antar pemanggilan. Bobot tinggal di host `~/apps/mapic-rembg` dan di-mount read-only (`REMBG_HOME=/models`); tanpa bobot endpoint balas `503` dan **tidak** mengunduh saat request. Batas mutu: objek buram berlatar bersih bagus, objek bening (kaca/es) belum layak. **Lisensi bobot IS-Net belum jelas untuk komersial** (repo DIS Apache-2.0 hanya untuk "code and evaluation metric"; issue #150 terbuka) sehingga ini boleh dipakai untuk uji internal, tetapi belum boleh dirilis sebagai produk.
+- **Riwayat (2026-09-25):** hasil cutout diberi label `Remove background — <nama sumber>` (nama berkas unggahan atau prompt sumber dari riwayat, dibersihkan server: karakter kontrol dibuang, spasi dirapatkan, maksimal 80 karakter). Kolom `prompt` lama dipakai ulang sehingga **tidak ada migrasi DB**; baris lama tetap berbunyi `Remove background`. Sidebar kini satu baris terpotong dengan tooltip teks penuh plus kotak pencarian di sisi klien (tanpa endpoint baru).
 - **Multi-reference:** sampai 10 gambar untuk I2I.
 - **Guidance:** default tanpa guidance. `true_cfg_scale > 1` hanya aktif bersama negative prompt, dan menggandakan waktu per step.
 - **Rendering teks:** penungkit terbesarnya **disiplin prompt** (teks persis dalam tanda kutip, pendek, tipografi + posisi eksplisit), bukan setting. 60 step justru memunculkan artefak. Batas kerasnya resolusi 1 MP — teks kecil akan selalu kabur, perlu overlay setelah generasi.
@@ -39,6 +41,9 @@ project references :
 | `qwen_image_server/workflows.py` | Penyusun graph API-format untuk T2I dan I2I (1-10 referensi) |
 | `qwen_image_server/smoke_test.py` | Uji VRAM/timing untuk host baru (jalur diffusers, disimpan sebagai rujukan) |
 | `backend/services/qwen_image_service.py` | Klien backend → facade (retry, auto-load, timeout 1 jam, penerusan pesan error) |
+| `backend/services/remove_background_service.py` | Worker cutout CPU: `rembg` + `isnet-general-use`, alpha irisan sumber∩model, RGB dari sumber, guard bobot tanpa unduhan otomatis |
+| `frontend/src/lib/removeBackground.ts` | Helper murni toggle cutout: label sumber, deteksi hasil cutout, label tombol kirim |
+| `frontend/src/lib/historySearch.ts` | Filter pencarian riwayat di sisi klien |
 | `backend/config.py` | `QWEN_IMAGE_API_URL` (default localhost:30000), `QWEN_DEFAULT_RESOLUTION` |
 | `start-app.sh` | Menjalankan stack Docker (bukan lagi menyalakan service sendiri) |
 
