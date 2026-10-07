@@ -9,12 +9,12 @@ Empat layanan, masing-masing satu folder dengan Dockerfile sendiri:
 | `backend` | `backend/` | `8281` | API produk: auth, riwayat, Supabase |
 | `frontend` | `frontend/` | `5151` | Build Vite → disajikan nginx |
 
-Model tetap tinggal di host (`~/apps/qwen21-gguf`) dan di-mount read-only. Mengganti kuantisasi cukup dengan menukar file di folder itu, tanpa build ulang.
+Model tetap tinggal di host (`~/project_AI/qwen21-gguf`) dan di-mount read-only. Mengganti kuantisasi cukup dengan menukar file di folder itu, tanpa build ulang.
 
 Bobot cutout Remove Background juga tinggal di host, terpisah dari model Qwen:
 
 ```
-~/apps/mapic-rembg/models/isnet-general-use/isnet-general-use.onnx
+~/project_AI/mapic-rembg/models/isnet-general-use/isnet-general-use.onnx
 ```
 
 Folder itu di-mount read-only ke container `backend` sebagai `/models` (`REMBG_HOME=/models`). Tanpa folder tersebut, endpoint cutout mengembalikan `503` sementara jalur Generate tetap normal. Unduhan otomatis saat request sengaja dimatikan.
@@ -26,7 +26,7 @@ Folder itu di-mount read-only ke container `backend` sebagai `/models` (`REMBG_H
 ComfyUI memindai folder berdasarkan `comfyui/extra_model_paths.yaml`. Tata letak yang diharapkan:
 
 ```
-~/apps/qwen21-gguf/                 → di-mount sebagai /models (read-only)
+~/project_AI/qwen21-gguf/                 → di-mount sebagai /models (read-only)
 ├── diffusion_models/
 │   └── qwen-image-2.1-Q8_0.gguf    → boleh symlink ke file di luar folder
 ├── text_encoders/
@@ -38,15 +38,15 @@ ComfyUI memindai folder berdasarkan `comfyui/extra_model_paths.yaml`. Tata letak
 `diffusion_models/` mudah terlewat: tanpa folder itu, ComfyUI mengembalikan daftar kosong dan facade akan melaporkan `unet_name ... not in []`. Kalau file GGUF berada di lokasi lain, cukup buat symlink:
 
 ```bash
-mkdir -p ~/apps/qwen21-gguf/diffusion_models
-ln -sfn ../qwen-image-2.1-Q8_0.gguf ~/apps/qwen21-gguf/diffusion_models/
+mkdir -p ~/project_AI/qwen21-gguf/diffusion_models
+ln -sfn ../qwen-image-2.1-Q8_0.gguf ~/project_AI/qwen21-gguf/diffusion_models/
 docker compose restart comfyui    # folder dipindai saat start
 ```
 
 ## Menjalankan
 
 ```bash
-cd ~/apps/mapic-qwen/deploy/docker
+cd ~/project_AI/mapic-qwen/deploy/docker
 docker compose up -d --build
 docker compose ps
 ```
@@ -78,7 +78,7 @@ cp .env.example .env && nano .env
 
 **Ganti port** — ubah baris `ports:` layanan terkait di `docker-compose.yml`, lalu `docker compose up -d`.
 
-**Ganti model atau kuantisasi** — taruh file baru di `~/apps/qwen21-gguf/`, lalu ubah `QWEN_GGUF_NAME` (atau `QWEN_CLIP_NAME` / `QWEN_VAE_NAME`) pada layanan `qwen-image` di `docker-compose.yml`, dan `docker compose up -d qwen-image`. Tidak perlu build ulang image apa pun.
+**Ganti model atau kuantisasi** — taruh file baru di `~/project_AI/qwen21-gguf/`, lalu ubah `QWEN_GGUF_NAME` (atau `QWEN_CLIP_NAME` / `QWEN_VAE_NAME`) pada layanan `qwen-image` di `docker-compose.yml`, dan `docker compose up -d qwen-image`. Tidak perlu build ulang image apa pun.
 
 **Aktifkan 2K** — set `QWEN_MAX_RESOLUTION: "2048"` pada `qwen-image`, dan longgarkan `frontend` (selector resolusi saat ini disembunyikan).
 

@@ -173,7 +173,7 @@ Ini keuntungan utama pemisahan per folder: rebuild selalu menyentuh satu layanan
 git push origin main
 
 # di server
-cd ~/apps/mapic-qwen && git pull --ff-only
+cd ~/project_AI/mapic-qwen && git pull --ff-only
 cd deploy/docker && docker compose build <layanan> && docker compose up -d <layanan>
 ```
 

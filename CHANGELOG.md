@@ -5,6 +5,37 @@ setiap entri memuat konteks, daftar berkas yang berubah, bukti, dampak, dan cara
 
 > Catatan: berkas ini dibuat pada 2026-09-23. Commit-commit sebelumnya belum punya entri.
 
+### 2026-09-25 — `chore: relocate host deployment directory apps/ to project_AI/`
+
+**Konteks.** Permintaan pengguna: folder deployment di host gspe-ai2 (`/home/gspe-ai2/apps/`) diganti nama
+menjadi `/home/gspe-ai2/project_AI/`, sekaligus membereskan 4 unit systemd rollback lama. Audit pra-rename
+menemukan 6 titik yang bergantung path absolut: bind mount container jalan, `.env` compose, default
+`docker-compose.yml`, unit systemd (disabled), folder tetangga (`comfyui`, `qwen21-gguf`, `mapic-rembg`
+ikut pindah), dan dokumentasi. Risiko utama: Docker me-resolve path bind mount saat container start —
+rename tanpa stop/start membuat container berikutnya mendapat folder kosong baru tanpa error jelas.
+
+**Yang berubah.**
+
+| Berkas | Perubahan |
+|---|---|
+| host: `/home/gspe-ai2/apps` | Direname menjadi `/home/gspe-ai2/project_AI` (semua isi ikut) |
+| host: `deploy/docker/.env` | `MODELS_DIR=/home/gspe-ai2/project_AI/qwen21-gguf` |
+| `deploy/docker/docker-compose.yml` | 2 default volume diubah ke `project_AI` |
+| `deploy/docker/.env.example` | Path contoh diperbarui |
+| host: `/etc/systemd/system/{mapic-backend,qwen-image,comfyui,mapic-frontend}.service` | Semua path `apps/` → `project_AI/`, `daemon-reload` dijalankan (unit tetap disabled sebagai rollback) |
+| `WORKFLOW.md`, `deploy/docker/README.md`, `AGENTS.md` | Semua referensi `~/apps/` → `~/project_AI/` |
+
+**Bukti.** Downtime ~3 menit (compose stop → mv → edit config → up). Setelah start ulang: 4 container Up
+(comfyui healthy), health frontend `200` + backend `200`, `docker inspect` menunjukkan mount baru
+`/home/gspe-ai2/project_AI/qwen21-gguf->/models` dan `/home/gspe-ai2/project_AI/mapic-rembg->/models`,
+GGUF loader ComfyUI (`object_info/UnetLoaderGGUF`) tetap melihat `qwen-image-2.1-Q8_0.gguf`, bobot
+`isnet-general-use.onnx` terbaca dari container backend, GPU 1 terpakai. Commit lokal `3a872d8` pada
+checkout host tidak terpengaruh.
+
+**Dampak & rollback.** Tidak ada perubahan kode; hanya path host. Rollback: `docker compose stop`,
+`mv ~/project_AI ~/apps`, kembalikan sed di `.env`, `docker-compose.yml`, `.env.example`, unit systemd,
+`daemon-reload`, `docker compose up -d`.
+
 ### 2026-09-25 — `feat: label remove-background history items and search history`
 
 **Konteks.** Uji UI nyata menunjukkan setiap hasil Remove Background tersimpan dengan prompt riwayat

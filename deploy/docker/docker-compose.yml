@@ -18,7 +18,7 @@ services:
     restart: unless-stopped
     volumes:
       # Sumber model (qwen-image-2.1-Q8_0.gguf, text_encoders/, vae/)
-      - ${MODELS_DIR:-/home/gspe-ai2/apps/qwen21-gguf}:/models:ro
+      - ${MODELS_DIR:-/home/gspe-ai2/project_AI/qwen21-gguf}:/models:ro
       # Direktori kerja ComfyUI: input (gambar referensi), output, temp
       - comfyui-input:/opt/ComfyUI/input
       - comfyui-output:/opt/ComfyUI/output
@@ -80,7 +80,7 @@ services:
       # dalam mount harus <REMBG_HOME>/models/<nama>/<nama>.onnx.
       REMBG_HOME: /models
     volumes:
-      - ${CUTOUT_MODELS_DIR:-/home/gspe-ai2/apps/mapic-rembg}:/models:ro
+      - ${CUTOUT_MODELS_DIR:-/home/gspe-ai2/project_AI/mapic-rembg}:/models:ro
     ports:
       - "8281:8000"
     depends_on:
