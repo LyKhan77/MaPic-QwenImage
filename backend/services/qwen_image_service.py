@@ -20,6 +20,15 @@ class QwenImageError(Exception):
     pass
 
 
+class QwenImageTimeoutError(QwenImageError):
+    """Timeout menunggu downstream.
+
+    Job bisa saja sudah diterima facade saat timeout terjadi, jadi panggilan ini
+    tidak boleh diulang otomatis — retry berisiko menggandakan generation.
+    Endpoint service memetakannya ke HTTP 504.
+    """
+
+
 def _error_detail(response: httpx.Response) -> str:
     """Ambil pesan error dari body JSON inference server, apa pun bentuknya."""
     try:
@@ -127,7 +136,9 @@ async def generate_image_bytes(
                 if not images or "b64_json" not in images[0]:
                     raise QwenImageError(f"Respons Qwen-Image tidak berisi gambar: {str(data)[:200]}")
                 return base64.b64decode(images[0]["b64_json"])
-        except httpx.ConnectError as exc:
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            # Koneksi belum pernah terbentuk, jadi job tidak mungkin diterima
+            # downstream — aman diulang selama server masih memuat model.
             last_exc = exc
             logger.warning("Qwen-Image server not ready, retry %d/%d in %ds", attempt + 1, MAX_RETRIES, RETRY_DELAY)
             await asyncio.sleep(RETRY_DELAY)
@@ -135,6 +146,10 @@ async def generate_image_bytes(
             detail = _error_detail(exc.response)
             logger.error("Qwen-Image server returned %s: %s", exc.response.status_code, detail)
             raise QwenImageError(detail) from exc
+        except httpx.TimeoutException as exc:
+            # Timeout ambigu: job mungkin sudah diterima facade. Tidak di-retry.
+            logger.error("Qwen-Image request timed out after %ss", TIMEOUT_SECONDS)
+            raise QwenImageTimeoutError(f"Qwen-Image server timed out after {TIMEOUT_SECONDS}s") from exc
         except QwenImageError:
             raise
         except Exception as exc:

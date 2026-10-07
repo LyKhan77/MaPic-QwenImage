@@ -7,17 +7,19 @@ from io import BytesIO
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
+from pydantic import ValidationError
 import uvicorn.logging
 
 try:
-    from backend.auth import require_user
-    from backend.config import CORS_ORIGINS, QWEN_IMAGE_API_URL
-    from backend.schemas import ActiveGeneration, GenerateRequest, Generation, RemoveBackgroundRequest
+    from backend.auth import require_service_token, require_user
+    from backend.config import CORS_ORIGINS, QWEN_IMAGE_API_URL, QWEN_MAX_RESOLUTION
+    from backend.schemas import ActiveGeneration, GenerateRequest, Generation, RemoveBackgroundRequest, ServiceGenerateRequest, ServiceImageResponse
     from backend.services import remove_background_service
-    from backend.services.qwen_image_service import QwenImageError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model
+    from backend.services.qwen_image_service import QwenImageError, QwenImageTimeoutError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model
     from backend.services.supabase_service import (
         GenerationNotFound,
         SupabaseError,
@@ -28,11 +30,11 @@ try:
         upload_image,
     )
 except ModuleNotFoundError:
-    from auth import require_user
-    from config import CORS_ORIGINS, QWEN_IMAGE_API_URL
-    from schemas import ActiveGeneration, GenerateRequest, Generation, RemoveBackgroundRequest
+    from auth import require_service_token, require_user
+    from config import CORS_ORIGINS, QWEN_IMAGE_API_URL, QWEN_MAX_RESOLUTION
+    from schemas import ActiveGeneration, GenerateRequest, Generation, RemoveBackgroundRequest, ServiceGenerateRequest, ServiceImageResponse
     from services import remove_background_service
-    from services.qwen_image_service import QwenImageError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model
+    from services.qwen_image_service import QwenImageError, QwenImageTimeoutError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model
     from services.supabase_service import (
         GenerationNotFound,
         SupabaseError,
@@ -81,6 +83,17 @@ MAX_REMOVE_BACKGROUND_PIXELS = 4_194_304
 REMOVE_BACKGROUND_PROMPT = "Remove background"
 MAX_SOURCE_LABEL_CHARS = 80
 
+# Service API (untuk backend lokal Inkspire): jalur stateless tanpa Supabase.
+# Batas gambar menyamakan nilai dengan batas cutout di atas — host ini punya RAM
+# terbatas, dan jumlah gambar saja tidak membatasi konsumsi memori. Klien
+# (Inkspire) harus mengecilkan gambar sebelum mengirim; nilainya didokumentasikan
+# di API.md.
+MAX_SERVICE_REQUEST_BYTES = 32 * 1024 * 1024  # body JSON mentah, sebelum parsing
+MAX_SERVICE_IMAGE_BASE64_CHARS = 2_800_000  # ~2 MiB PNG/JPEG per gambar
+MAX_SERVICE_IMAGE_BYTES = 2 * 1024 * 1024
+MAX_SERVICE_IMAGE_SIDE = 2048
+MAX_SERVICE_IMAGE_PIXELS = 4_194_304
+
 
 def _clean_source_label(raw: str | None) -> str:
     """Collapse a client-supplied label to one short, safe display line.
@@ -103,6 +116,68 @@ def _history_prompt_for_cutout(label: str) -> str:
 
 def _can_accept_generation(active_generations: dict[str, dict]) -> bool:
     return len(active_generations) < MAX_GLOBAL_GENERATIONS
+
+
+async def _read_limited_body(request: Request, max_bytes: int) -> bytes:
+    """Baca body request dengan batas keras sebelum JSON diparsing.
+
+    Header `Content-Length` saja tidak cukup (bisa absen pada body chunked), jadi
+    hitungan byte dilakukan saat streaming dan pembacaan dihentikan begitu batas
+    terlampaui.
+    """
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > max_bytes:
+            raise HTTPException(status_code=413, detail="Request body is too large")
+    return bytes(body)
+
+
+def _validate_service_images(images: list[str] | None) -> None:
+    """Tolak gambar referensi yang terlalu besar/rusak sebelum inference.
+
+    Dipanggil sebelum job masuk antrean, jadi request yang jelas salah tidak
+    memakan slot. Pemeriksaan ukuran/dimensi dibaca dari header gambar lebih dulu
+    (tanpa memuat piksel penuh) supaya PNG kecil berisi dimensi raksasa tidak
+    sempat didekode. Satu-satunya data yang menyentuh disk/memori adalah salinan
+    sementara yang dibuang lagi di akhir fungsi.
+    """
+    for index, encoded in enumerate(images or [], start=1):
+        if len(encoded) > MAX_SERVICE_IMAGE_BASE64_CHARS:
+            raise HTTPException(status_code=413, detail=f"Reference image {index} is too large")
+
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=f"Reference image {index} is not valid base64") from exc
+
+        if len(raw) > MAX_SERVICE_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail=f"Reference image {index} is too large")
+
+        try:
+            image = Image.open(BytesIO(raw))
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Reference image {index} could not be read") from exc
+
+        with image:
+            if image.format not in {"PNG", "JPEG"}:
+                raise HTTPException(status_code=422, detail=f"Reference image {index} must be PNG or JPEG")
+            width, height = image.size
+            if (
+                width <= 0
+                or height <= 0
+                or max(width, height) > MAX_SERVICE_IMAGE_SIDE
+                or width * height > MAX_SERVICE_IMAGE_PIXELS
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Reference image {index} dimensions {width}x{height} exceed the supported range",
+                )
+            try:
+                image.load()
+            except Exception as exc:
+                raise HTTPException(status_code=422, detail=f"Reference image {index} could not be read") from exc
+
 
 origins = [origin.strip() for origin in CORS_ORIGINS.split(",") if origin.strip()]
 
@@ -162,6 +237,10 @@ async def api_active_generations(_: UUID = Depends(require_user)):
     now = time.time()
     result = []
     for gen_id, info in _active_generations.items():
+        # Job service tidak punya identitas pengguna dan prompt/gambarnya tidak
+        # pernah disimpan, jadi tidak pernah muncul di daftar milik pengguna.
+        if info.get("kind") == "service":
+            continue
         result.append(ActiveGeneration(
             id=gen_id,
             user_id=str(info["user_id"]),
@@ -230,6 +309,82 @@ async def generate(payload: GenerateRequest, user_id: UUID = Depends(require_use
         raise HTTPException(status_code=500, detail="Internal server error") from exc
     finally:
         _active_generations.pop(gen_id, None)
+
+
+@app.post("/api/service/generate", response_model=ServiceImageResponse)
+async def service_generate(request: Request, _: None = Depends(require_service_token)):
+    """Generate untuk klien mesin (backend lokal Inkspire): stateless, tanpa Supabase.
+
+    Satu endpoint untuk T2I (tanpa `images`) dan I2I (dengan `images`), memakai
+    antrean admission dan lock inference yang sama dengan endpoint pengguna.
+    Hasil PNG dikembalikan langsung dan tidak disimpan di MaPic.
+    """
+    body = await _read_limited_body(request, MAX_SERVICE_REQUEST_BYTES)
+    try:
+        payload = ServiceGenerateRequest.model_validate_json(body)
+    except ValidationError as exc:
+        # Bentuk 422 disamakan dengan validasi FastAPI biasa (`loc` diawali
+        # "body", tanpa kunci `url`), tetapi nilai `input`/`ctx` dibuang supaya
+        # respons error tidak menggemakan payload base64 yang baru ditolak.
+        errors = exc.errors(include_url=False)
+        for error in errors:
+            error.pop("input", None)
+            error.pop("ctx", None)
+            error["loc"] = ("body", *error["loc"])
+        raise RequestValidationError(errors) from exc
+
+    if payload.resolution > QWEN_MAX_RESOLUTION:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Resolution {payload.resolution} exceeds this server's limit of {QWEN_MAX_RESOLUTION}",
+        )
+
+    _validate_service_images(payload.images)
+
+    if not _can_accept_generation(_active_generations):
+        raise HTTPException(
+            status_code=429,
+            detail="Global generation queue is full. Try again later.",
+        )
+
+    job_id = str(uuid4())
+    # Metadata antrean sementara saja: tanpa prompt, gambar, atau identitas
+    # pengguna. Slot dilepas di `finally` pada sukses, exception, timeout,
+    # maupun pembatalan request.
+    _active_generations[job_id] = {
+        "kind": "service",
+        "queued_at": time.time(),
+        "started_at": None,
+        "status": "queued",
+    }
+    try:
+        async with _generation_lock:
+            info = _active_generations.get(job_id)
+            if info is not None:
+                info["started_at"] = time.time()
+                info["status"] = "running"
+
+            image_bytes = await generate_image_bytes(
+                payload.prompt,
+                payload.images,
+                payload.num_inference_steps,
+                payload.true_cfg_scale,
+                payload.negative_prompt,
+                payload.resolution,
+            )
+        return {"data": [{"b64_json": base64.b64encode(image_bytes).decode("utf-8")}]}
+    except QwenImageTimeoutError as exc:
+        # Pesan downstream bisa memuat detail internal; cukup di log server.
+        logger.error("Service generation timed out: %s", exc)
+        raise HTTPException(status_code=504, detail="Generation timed out") from exc
+    except QwenImageError as exc:
+        logger.error("Service generation failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Generation failed") from exc
+    except Exception as exc:
+        logger.exception("Unhandled error during service generation")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+    finally:
+        _active_generations.pop(job_id, None)
 
 
 @app.post("/api/remove-background", response_model=Generation)
