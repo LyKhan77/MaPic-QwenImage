@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 try:
     from backend.config import QWEN_DEFAULT_RESOLUTION
@@ -17,6 +17,31 @@ class GenerateRequest(BaseModel):
     true_cfg_scale: float = Field(default=1.0, ge=1.0, le=3.0)
     num_inference_steps: int = Field(default=40, ge=20, le=75)
     resolution: Literal[1024, 2048] = QWEN_DEFAULT_RESOLUTION
+
+
+class ServiceGenerateRequest(GenerateRequest):
+    """Request endpoint service: batas field sama dengan endpoint pengguna.
+
+    Satu-satunya perbedaan kontrak: prompt wajib tidak kosong setelah trim,
+    supaya job service tidak pernah sampai ke inference dengan prompt hampa.
+    """
+
+    @field_validator("prompt")
+    @classmethod
+    def prompt_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("prompt must not be blank")
+        return value
+
+
+class ServiceImage(BaseModel):
+    b64_json: str
+
+
+class ServiceImageResponse(BaseModel):
+    """Format respons facade yang dipakai apa adanya untuk T2I dan I2I."""
+
+    data: list[ServiceImage]
 
 
 class RemoveBackgroundRequest(BaseModel):

@@ -20,6 +20,14 @@ QWEN_IMAGE_API_URL = _get_env("QWEN_IMAGE_API_URL", "http://localhost:30000")
 QWEN_DEFAULT_RESOLUTION = int(_get_env("QWEN_DEFAULT_RESOLUTION", "1024"))
 if QWEN_DEFAULT_RESOLUTION not in (1024, 2048):
     raise RuntimeError("QWEN_DEFAULT_RESOLUTION must be 1024 or 2048")
+# Batas resolusi yang diterima endpoint service, dicek sebelum inference. Harus
+# sama dengan QWEN_MAX_RESOLUTION milik facade; default mengikuti default resolusi.
+QWEN_MAX_RESOLUTION = int(_get_env("QWEN_MAX_RESOLUTION", str(QWEN_DEFAULT_RESOLUTION)))
 MODEL_NAME = "qwen-image-2.1"
+
+# Token mesin untuk endpoint service (mis. backend lokal Inkspire). Kosong berarti
+# endpoint service dinonaktifkan (fail closed, HTTP 503); endpoint pengguna tidak
+# terpengaruh. Tidak ada nilai default yang bisa ditebak.
+MAPIC_SERVICE_TOKEN = _get_env("MAPIC_SERVICE_TOKEN", "")
 
 CORS_ORIGINS = _get_env("CORS_ORIGINS", "http://localhost:5151,http://localhost:5152,http://127.0.0.1:5151,http://127.0.0.1:5152,http://192.168.2.142:5151")
