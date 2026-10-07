@@ -241,7 +241,7 @@ curl --fail-with-body --silent --show-error \
   --output generation.json
 ```
 
-**Mengaktifkan/menonaktifkan.** Isi atau kosongkan `MAPIC_SERVICE_TOKEN` di `backend/.env`, lalu `docker compose restart backend`. Token kosong = route service `503` (fail closed); endpoint pengguna tidak terpengaruh. Cara rotasi dan rollback ada di `deploy/docker/README.md`.
+**Mengaktifkan/menonaktifkan.** Isi atau kosongkan `MAPIC_SERVICE_TOKEN` di `backend/.env`, lalu `docker compose up -d backend` (recreate — `restart` tidak menerapkan perubahan `env_file`). Token kosong = route service `503` (fail closed); endpoint pengguna tidak terpengaruh. Cara rotasi dan rollback ada di `deploy/docker/README.md`.
 
 ---
 

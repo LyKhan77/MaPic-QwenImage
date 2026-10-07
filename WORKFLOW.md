@@ -163,7 +163,7 @@ Skrip `start-app.sh` di root repo hanya membungkus perintah ini.
 | Kode facade (`qwen_image_server/`) | `docker compose build qwen-image && docker compose up -d qwen-image` | Ya (kecil, ~30 detik) |
 | Kode backend (`backend/`) | `docker compose build backend && docker compose up -d backend` | Ya (kecil) |
 | Kode frontend (`frontend/`) | `docker compose build frontend && docker compose up -d frontend` | Ya (~1 menit) |
-| Nilai di `backend/.env` | `docker compose restart backend` | **Tidak** |
+| Nilai di `backend/.env` | `docker compose up -d backend` (recreate — `restart` tidak menerapkan `env_file`) | **Tidak** |
 | Variabel di `deploy/docker/.env` | `docker compose up -d` | Tidak untuk backend/facade; **ya** untuk frontend (nilainya ditanam saat build) |
 | Ganti model / kuantisasi | Taruh file, ubah `QWEN_GGUF_NAME`, `up -d qwen-image` | **Tidak** |
 
