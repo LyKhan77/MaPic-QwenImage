@@ -5,6 +5,30 @@ setiap entri memuat konteks, daftar berkas yang berubah, bukti, dampak, dan cara
 
 > Catatan: berkas ini dibuat pada 2026-09-23. Commit-commit sebelumnya belum punya entri.
 
+### 2026-10-07 — `feat: add stateless service API for Inkspire`
+
+**Konteks.** Permintaan pengguna (spec `temp/prompt/mapic-service-api.md`): aplikasi internal Inkspire — web app drawing/diagram local-first tanpa akun — perlu memakai model image generation MaPic tanpa login Supabase. Backend MaPic dijadikan batas akses: satu endpoint mesin-ke-mesin `POST /api/service/generate` dengan Bearer token dari environment backend, jalur stateless (tanpa history/Storage), berbagi antrean dan lock inference dengan endpoint pengguna. Facade dan ComfyUI tetap tidak diekspos; pemanggil yang benar adalah backend lokal Inkspire lewat LAN, bukan JavaScript browser.
+
+**Yang berubah.**
+
+| Berkas | Perubahan |
+|---|---|
+| `backend/config.py` | `MAPIC_SERVICE_TOKEN` (default kosong = fail closed) dan `QWEN_MAX_RESOLUTION` (default mengikuti `QWEN_DEFAULT_RESOLUTION`). |
+| `backend/auth.py` | Dependency baru `require_service_token`: `503` bila token env kosong **atau hanya spasi** (nilai dirapikan dari spasi di ujung, jadi `.env` yang salah edit tidak membuat token mustahil cocok), `401` bila header hilang/skema bukan Bearer/token salah, dibandingkan `secrets.compare_digest`; tidak menyentuh JWKS. JWT pengguna tidak pernah diterima di sini. |
+| `backend/schemas.py` | `ServiceGenerateRequest` (subclass `GenerateRequest` + validator prompt tidak kosong setelah trim), `ServiceImage`, `ServiceImageResponse` (`{"data":[{"b64_json": ...}]}`). |
+| `backend/main.py` | Route `POST /api/service/generate`: `_read_limited_body` (cap 32 MiB, 413 sebelum parsing, berlaku juga untuk body chunked tanpa Content-Length), validasi resolusi vs `QWEN_MAX_RESOLUTION` (422 sebelum inference), `_validate_service_images` (base64/format/dimensi; 413/422 sebelum antrean), admission `_can_accept_generation` dan `_generation_lock` yang sama dengan jalur pengguna, metadata job `kind: "service"` tanpa prompt/gambar/identitas, slot dilepas di `finally`. Bentuk 422 disamakan dengan validasi FastAPI (`loc` diawali `body`) tanpa menggemakan nilai input/`ctx` yang dikirim. `api_active_generations` menyaring job service. Mapping error 401/413/422/429/502/503/504. |
+| `backend/services/qwen_image_service.py` | `QwenImageTimeoutError(QwenImageError)` untuk `httpx.TimeoutException`; timeout downstream tetap 3600 s dan **tidak** di-retry (job bisa sudah diterima facade). Retry `ConnectError` + `ConnectTimeout` (koneksi belum pernah terbentuk, aman diulang) tidak berubah. |
+| `backend/tests/test_service_api.py` | Baru. 45 tes `unittest` + `TestClient` dengan mock downstream (tanpa GPU/Supabase): fail closed 503 (termasuk token hanya spasi) sementara route pengguna tetap jalan, 401 sebelum inference, token dengan spasi di ujung tetap cocok, token service ditolak di history/delete/generate pengguna tanpa JWKS, T2I+I2I dan bentuk respons, jalur sukses tanpa panggilan Supabase (sentinel pada klien Supabase + semua helper storage/auth), validasi prompt/steps/CFG/resolusi (batas host di-pin, tidak bergantung env)/11 gambar/base64 rusak/gambar besar (gerbang karakter dan gerbang byte)/dimensi/body, bentuk 422 tanpa echo input, body chunked tanpa Content-Length (413 di atas batas, 200 di bawah), validasi mendahului admission saat antrean penuh, admission gabungan 429 dan pelepasan slot, lock inference bersama lintas route (uji thread), pelepasan slot+lock saat request dibatalkan, 502/504 tanpa kebocoran pesan internal + slot tidak bocor, regresi auth & isolasi pemilik riwayat. |
+| `backend/.env.example`, `deploy/docker/docker-compose.yml` | `MAPIC_SERVICE_TOKEN=""` (placeholder) dan `QWEN_MAX_RESOLUTION: "1024"` untuk layanan backend. |
+| `API.md` | Bagian `POST /api/service/generate` (auth, contoh T2I/I2I, tabel batas payload, tabel error, contoh curl aman, sifat stateless/blocking), model baru, tabel error & environment, catatan concurrency (admission gabungan, disconnect, reverse proxy). |
+| `deploy/docker/README.md` | Cara mengaktifkan, merotasi, dan menonaktifkan token; catatan LAN/HTTPS. |
+| `WORKFLOW.md`, `database-schema.md` | Tabel kapasitas + catatan service; koreksi catatan usang "delete tidak memverifikasi pemilik" (kode sudah memverifikasi lewat token). |
+| `README.md`, `AGENTS.md`, `CLAUDE.md` | Fitur Service API, diagram alur dengan jalur Inkspire, env backend, dan Current State. |
+
+**Bukti.** `SUPABASE_URL=https://example.supabase.co SUPABASE_SERVICE_ROLE_KEY=test backend/.venv/bin/python -m unittest discover -s backend/tests` → `Ran 87 tests ... OK` (45 tes baru; 42 tes lama tetap lulus). Suite baru juga hermetik terhadap `QWEN_MAX_RESOLUTION` (diulang dengan env `QWEN_MAX_RESOLUTION=2048` → `Ran 45 tests ... OK`). `backend/.venv/bin/python -m compileall -q backend` tanpa keluaran. Semua tes memakai mock/fake downstream — tanpa GPU, token asli, atau koneksi Supabase eksternal. Berkas tes di-`git add -f` karena aturan ignore generik `tests/` (`.gitignore:34`); `git ls-files` mengonfirmasi path-nya ter-track. Belum ada verifikasi live di server pada commit ini.
+
+**Dampak & rollback.** Endpoint pengguna tidak berubah kontraknya; service route mati secara default karena `MAPIC_SERVICE_TOKEN` kosong, jadi deploy tanpa mengisi token tidak membuka apa pun. Jalur service tidak menyimpan prompt/gambar/hasil dan tidak muncul di `GET /api/generations/active`; batas 10 pekerjaan dan lock inference berlaku gabungan dengan jalur pengguna. Backend tetap memerlukan konfigurasi Supabase saat start — yang dijamin bebas panggilan Supabase hanya jalur request service. Rollback: kosongkan `MAPIC_SERVICE_TOKEN` lalu `docker compose restart backend` (route langsung `503`, endpoint pengguna tidak tersentuh), atau revert commit ini.
+
 ### 2026-09-25 — `chore: relocate host deployment directory apps/ to project_AI/`
 
 **Konteks.** Permintaan pengguna: folder deployment di host gspe-ai2 (`/home/gspe-ai2/apps/`) diganti nama

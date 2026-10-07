@@ -21,13 +21,15 @@ The React frontend (`:5151`) communicates exclusively with the **MaPic Backend**
 
 ### Authentication
 
-Semua endpoint kecuali `GET /api/health` memerlukan header:
+Endpoint pengguna (semua kecuali `GET /api/health` dan route service) memerlukan header:
 
 ```
 Authorization: Bearer <access_token Supabase>
 ```
 
 Backend memverifikasi tanda tangan token lewat JWKS project (kunci asimetris ES256/RS256) dan memakai claim `sub` sebagai identitas user. `user_id` yang dikirim klien di body atau URL **diabaikan/diverifikasi**, sehingga tidak ada lagi cara memanggil API sebagai user lain hanya dengan menebak UUID.
+
+Route service (`POST /api/service/generate`) memakai kredensial mesin terpisah dari environment backend — lihat [Service API](#post-apiservicegenerate). JWT pengguna **tidak** berlaku di route service, dan token service **tidak** berlaku di endpoint pengguna (ditolak `401` sebelum menyentuh JWKS).
 
 | Kode | Arti |
 |---|---|
@@ -134,7 +136,7 @@ Generate an image from a text prompt (T2I) or from a prompt + reference images (
 - If `images` is omitted or empty, performs **text-to-image (T2I)** generation.
 - If `images` is provided (base64-encoded PNG/JPEG strings), performs **image-to-image (I2I)** generation using the reference images.
 - `num_inference_steps` is configurable from `20` to `75` (default `40`).
-- `resolution` accepts `1024` (host ini memblokir 2048 karena VRAM 16 GB; permintaan 2048 ditolak dengan HTTP 400, bukan OOM).
+- `resolution` accepts `1024` atau `2048` di skema; host ini memblokir 2048 karena VRAM 16 GB — facade menolaknya dengan HTTP 400 sebelum inference dan backend meneruskannya sebagai `502` untuk endpoint pengguna (bukan OOM).
 - `true_cfg_scale` accepts `1.0` to `3.0`. Qwen-Image 2.1 is sampled without guidance by default, so CFG only activates when `true_cfg_scale` is above `1.0` **and** `negative_prompt` is set — that roughly doubles the time per denoising step.
 - At most 10 reference images are accepted per request.
 - The backend accepts up to 10 queued/running/saving generation jobs globally.
@@ -146,6 +148,100 @@ Generate an image from a text prompt (T2I) or from a prompt + reference images (
 - `429` — Global generation queue is full.
 - `502` — Qwen-Image Server error or Supabase error.
 - `500` — Internal server error.
+
+---
+
+### `POST /api/service/generate`
+Generate mesin-ke-mesin untuk backend lokal **Inkspire**: satu endpoint untuk text-to-image dan image-to-image, tanpa login Supabase. Hasil dikembalikan langsung sebagai PNG base64 dan **tidak** disimpan di MaPic.
+
+**Autentikasi:** `Authorization: Bearer <MAPIC_SERVICE_TOKEN>`. Token adalah kredensial mesin dari environment backend — bukan JWT Supabase dan bukan service-role key Supabase. Client yang benar adalah backend lokal Inkspire (server-ke-server) lewat LAN; jangan memanggilnya dari JavaScript browser. JWT pengguna tidak diterima di route ini, dan token service tidak berlaku di endpoint pengguna.
+
+**Request body:** `ServiceGenerateRequest` — field sama dengan `GenerateRequest`, dengan satu tambahan aturan: `prompt` wajib tidak kosong setelah trim.
+
+Contoh T2I:
+
+```json
+{
+  "prompt": "Minimal green ink illustration of a creative workspace",
+  "negative_prompt": "",
+  "true_cfg_scale": 1.0,
+  "num_inference_steps": 40,
+  "resolution": 1024
+}
+```
+
+Contoh I2I (maksimal 10 referensi):
+
+```json
+{
+  "prompt": "Turn this sketch into a clean product illustration",
+  "images": ["<base64 PNG/JPEG tanpa prefiks data URL>"],
+  "true_cfg_scale": 1.0,
+  "num_inference_steps": 40,
+  "resolution": 1024
+}
+```
+
+**Response `200`** (dikirim setelah generation selesai — endpoint blocking, sama untuk T2I dan I2I):
+
+```json
+{
+  "data": [
+    {
+      "b64_json": "<PNG base64>"
+    }
+  ]
+}
+```
+
+**Batas payload (semua dicek sebelum inference, sebelum slot antrean diambil):**
+
+| Batas | Nilai | Pelanggaran |
+|---|---|---|
+| Body request mentah | 32 MiB | `413` |
+| String base64 per gambar | 2.800.000 karakter | `413` |
+| Byte hasil decode per gambar | 2 MiB | `413` |
+| Sisi gambar | 2048 px | `422` |
+| Piksel gambar | 4.194.304 | `422` |
+| Jumlah gambar | 10 | `422` |
+| `num_inference_steps` | 20–75, default 40 | `422` |
+| `true_cfg_scale` | 1.0–3.0, default 1.0 | `422` |
+| `resolution` | ≤ `QWEN_MAX_RESOLUTION` (1024 di host ini) | `422` |
+
+Klien (Inkspire) harus mengecilkan gambar sebelum mengirim; jumlah gambar saja tidak membatasi konsumsi memori server.
+
+**Errors:**
+- `401` — Header hilang, skema bukan `Bearer`, atau token salah.
+- `413` — Body request atau gambar referensi melebihi batas.
+- `422` — Input tidak valid (prompt kosong/terlalu panjang, steps/CFG/resolusi di luar rentang, lebih dari 10 gambar, base64 rusak, format bukan PNG/JPEG, dimensi terlalu besar).
+- `429` — Antrean generasi gabungan (pengguna + service) penuh.
+- `502` — Downstream gagal atau memberi hasil tidak valid.
+- `503` — Service API dinonaktifkan (`MAPIC_SERVICE_TOKEN` kosong/tidak diset).
+- `504` — Downstream generation timeout.
+- `500` — Internal server error.
+
+Pesan `502`/`504` sengaja umum; detail lengkap hanya ada di log server. Body `422` mengikuti bentuk validasi FastAPI (`type`/`loc`/`msg`, `loc` diawali `body`) tanpa menggemakan nilai input yang dikirim. Tidak ada retry otomatis setelah timeout.
+
+**Sifat jalur service:**
+- **Stateless.** Tidak ada verifikasi Supabase Auth/JWKS, tidak ada `user_id`, tidak ada record history, upload Storage, atau `public_url`. Prompt, gambar referensi, dan hasil tidak disimpan permanen di MaPic. Metadata antrean sementara (tanpa prompt/gambar/identitas) dihapus begitu job selesai/gagal.
+- **Antrean dan lock bersama.** Job service memakai mekanisme admission dan `_generation_lock` yang sama dengan endpoint pengguna; batas 10 pekerjaan berlaku untuk gabungan kedua jalur. Job service tidak muncul di `GET /api/generations/active`.
+- **Blocking, tanpa progress per-job atau cancel.** `GET /api/health` tetap satu-satunya penanda kesiapan model; status di `GET /api/generations/status` bersifat global, bukan progress request tertentu. Client yang disconnect tidak membatalkan job GPU — facade tidak mendukung cancellation.
+- **Tanpa Supabase di jalur request.** Aplikasi MaPic secara keseluruhan tetap membutuhkan konfigurasi Supabase saat start (dan membuat klien Supabase saat import); yang dijamin bebas panggilan Supabase adalah jalur request service generation.
+
+**Contoh aman** (nilai diambil dari environment lokal, bukan ditulis ke source atau config yang di-commit):
+
+```sh
+# MAPIC_BASE_URL dan MAPIC_SERVICE_TOKEN diisi di environment lokal,
+# bukan ditulis ke source code atau committed config.
+curl --fail-with-body --silent --show-error \
+  --request POST "$MAPIC_BASE_URL/api/service/generate" \
+  --header "Authorization: Bearer $MAPIC_SERVICE_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"prompt":"Minimal green ink illustration","resolution":1024,"num_inference_steps":40}' \
+  --output generation.json
+```
+
+**Mengaktifkan/menonaktifkan.** Isi atau kosongkan `MAPIC_SERVICE_TOKEN` di `backend/.env`, lalu `docker compose restart backend`. Token kosong = route service `503` (fail closed); endpoint pengguna tidak terpengaruh. Cara rotasi dan rollback ada di `deploy/docker/README.md`.
 
 ---
 
@@ -439,6 +535,15 @@ Image-to-image generation (multi-reference).
 | `num_inference_steps` | `integer` | No | Diffusion step count, `20..75`, default `40`. |
 | `resolution` | `integer` | No | `1024` (host ini menolak `2048`), default `1024`. |
 
+### `ServiceGenerateRequest`
+Field sama dengan `GenerateRequest` (termasuk `images` maksimal 10), dengan tambahan aturan: `prompt` wajib dan tidak kosong setelah trim.
+
+### `ServiceImageResponse`
+| Field | Type | Description |
+|-------|------|-------------|
+| `data` | `list[ServiceImage]` | Selalu berisi satu elemen untuk endpoint ini. |
+| `data[].b64_json` | `string` | PNG hasil generation, base64 tanpa prefiks data URL. |
+
 ### `Generation`
 | Field | Type | Description |
 |-------|------|-------------|
@@ -493,9 +598,15 @@ Image-to-image generation (multi-reference).
 
 | Status | Meaning |
 |--------|---------|
-| `429` | Global generation queue is full. |
+| `401` | Token tidak ada/tidak valid — JWT pengguna di endpoint pengguna, atau token service di route service. |
+| `403` | JWT valid tetapi mencoba membaca riwayat milik user lain. |
+| `413` | Payload gambar/body melebihi batas (Remove Background dan service generate). |
+| `422` | Input tidak valid (skema, base64, format, atau dimensi gambar). |
+| `429` | Antrean generasi gabungan (pengguna + service) penuh. |
 | `500` | Unexpected internal server error. |
-| `502` | Downstream service error (Qwen-Image Server or Supabase). Check the `detail` field for specifics. |
+| `502` | Downstream service error (Qwen-Image Server atau Supabase). Di endpoint pengguna `detail` memuat pesan spesifik; di endpoint service pesan sengaja umum dan detailnya hanya di log server. |
+| `503` | Layanan tidak tersedia — model cutout hilang, atau service API dinonaktifkan (token kosong). |
+| `504` | Downstream generation timeout (endpoint service). |
 
 ### Qwen-Image Server
 
@@ -533,6 +644,8 @@ See [`database-schema.md`](./database-schema.md) for the Supabase Auth, Postgres
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | — | Supabase service role key (admin). |
 | `QWEN_IMAGE_API_URL` | No | `http://localhost:30000` | URL of the Qwen-Image Server. |
 | `QWEN_DEFAULT_RESOLUTION` | No | `1024` | Default output resolution. |
+| `QWEN_MAX_RESOLUTION` | No | mengikuti `QWEN_DEFAULT_RESOLUTION` | Batas resolusi endpoint service; samakan dengan `QWEN_MAX_RESOLUTION` layanan facade. |
+| `MAPIC_SERVICE_TOKEN` | No | — (kosong) | Token mesin endpoint service. Kosong/tidak diset = route service `503` (fail closed). Nilai asli hanya di `backend/.env` server. |
 | `CORS_ORIGINS` | No | `http://localhost:5151,...` | Comma-separated allowed origins. |
 
 ### Qwen-Image Server
@@ -553,8 +666,13 @@ The facade listens on port `30000` **hanya di network internal Docker** — tida
 
 ## Concurrency & Timeouts
 
-- **Backend generation lock:** The MaPic Backend uses an `asyncio.Lock` around Qwen generation calls so only **one accepted generation** is sent into inference at a time. Active jobs remain `queued` until they acquire this lock.
+- **Backend generation lock:** The MaPic Backend uses an `asyncio.Lock` around Qwen generation calls so only **one accepted generation** is sent into inference at a time. Active jobs remain `queued` until they acquire this lock. Endpoint pengguna dan endpoint service memakai lock yang sama.
+- **Admission gabungan:** batas 10 pekerjaan dihitung dari gabungan jalur pengguna dan service. Slot dilepas pada sukses, exception, timeout, maupun pembatalan request. Penghitung antrean hanya berlaku per proses backend (satu container, satu worker uvicorn) — jangan menaikkan jumlah worker tanpa memindahkan penghitung keluar memori.
+- **Job service dan daftar aktif:** job service tidak muncul di `GET /api/generations/active` dan metadatanya tidak memuat prompt, gambar, atau identitas pengguna.
 - **Inference lock:** The Qwen-Image Server also uses an `asyncio.Lock` as a downstream guard to ensure only **one generation request** runs at a time.
 - **Backend → Qwen-Image timeout:** `3600` seconds (1 hour). Enabling CFG roughly doubles each denoising step, so a job with guidance takes the longest.
-- **Backend retries:** Up to `6` retries with `10`-second delays on connection errors (useful when the server is still loading).
+- **Timeout di endpoint service:** dipetakan ke HTTP `504` dan **tidak** di-retry otomatis — job mungkin sudah diterima facade, jadi percobaan ulang berisiko menggandakan generation.
+- **Backend retries:** Up to `6` retries with `10`-second delays on connection errors only (termasuk connect timeout — koneksi belum pernah terbentuk, jadi aman diulang; berguna saat server masih memuat model). Kegagalan ambigu setelah request terkirim tidak pernah di-retry.
 - **Model idle timeout:** The Qwen-Image Server auto-unloads the model after `3600` seconds (1 hour) of inactivity to free VRAM.
+- **Disconnect klien:** endpoint generate bersifat blocking. Facade tidak mendukung cancellation, jadi client yang putus di tengah generation **tidak** menghentikan job GPU; slot backend dilepas saat handler selesai/gagal/dibatalkan, dan facade tetap menahan inference lock-nya sendiri sehingga tidak pernah ada dua inference bersamaan.
+- **Reverse proxy:** tidak ada proxy yang memotong request lebih awal pada deployment saat ini. Kalau menambahkan reverse proxy (mis. HTTPS untuk LAN), atur timeout-nya lebih panjang dari 3600 detik.

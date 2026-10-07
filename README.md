@@ -18,6 +18,7 @@ MaPic turns text prompts and reference images into production-quality visuals wi
 *   **Active Generation Recovery:** The active generation indicator shows queued/running/saving jobs, rehydrates the current user's active job view after refresh, and auto-focuses the latest finished result (including multi-queue completion order).
 *   **Configurable Generation Params:** Frontend exposes `num_inference_steps` and True CFG scale (with negative prompt). Resolusi terkunci di 1K — 2048 ditolak host ini.
 *   **History Management:** Generated images and prompts are saved to Supabase and can be viewed, selected, or deleted.
+*   **Service API (Inkspire):** `POST /api/service/generate` memberi aplikasi internal (backend lokal Inkspire) akses T2I/I2I lewat LAN dengan Bearer token mesin dari environment — tanpa login Supabase. Jalurnya stateless: hasil PNG dikembalikan langsung, tidak ditulis ke riwayat/Storage, dan berbagi antrean serta lock inference dengan jalur pengguna. Kontrak lengkap di `API.md`.
 *   **Secure Auth:** Supabase Authentication (email + password). API backend memverifikasi token Supabase di setiap request; identitas user diambil dari claim `sub`.
 *   **Responsive UI:** Collapsible sidebar, dark/light mode, Framer Motion animations, and mobile-friendly layout.
 *   **Share & Download:** Download images or copy direct public links.
@@ -27,11 +28,13 @@ MaPic turns text prompts and reference images into production-quality visuals wi
 ### Alur (semua di jaringan kantor, di dalam Docker)
 
 ```
-Browser kantor
-    |
-    +--> frontend :5151   (nginx, React SPA)
-            |
-            +--> backend :8281   (FastAPI — auth, riwayat, Supabase)
+Browser kantor                              Inkspire (backend lokal)
+    |                                             |
+    +--> frontend :5151  (nginx, React SPA)       |
+            |                                     |
+            +--> backend :8281  (FastAPI) <-------+
+                    |    auth: JWT Supabase (pengguna) /
+                    |          Bearer MAPIC_SERVICE_TOKEN (service)
                     |
                     +--> qwen-image :30000   (facade, internal saja)
                             |
@@ -115,10 +118,13 @@ Bobot model **tidak** ikut ke dalam image: unduh ke `~/apps/qwen21-gguf`, lalu f
 SUPABASE_URL="https://your-project.supabase.co"
 SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
 QWEN_DEFAULT_RESOLUTION="1024"
+QWEN_MAX_RESOLUTION="1024"
 CORS_ORIGINS="http://localhost:5151,http://192.168.2.142:5151"
+# Token mesin untuk endpoint service (Inkspire). Kosong = route service 503.
+MAPIC_SERVICE_TOKEN=""
 ```
 
-`QWEN_IMAGE_API_URL` tidak perlu diisi manual — compose menetapkannya ke `http://qwen-image:30000` di network internal.
+`QWEN_IMAGE_API_URL` tidak perlu diisi manual — compose menetapkannya ke `http://qwen-image:30000` di network internal. Cara mengisi/merotasi `MAPIC_SERVICE_TOKEN` ada di [`deploy/docker/README.md`](deploy/docker/README.md).
 
 ### 4. Frontend — nilai build-time
 

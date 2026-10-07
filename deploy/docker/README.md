@@ -64,7 +64,7 @@ Dua sumber, dipisah berdasarkan kebutuhannya:
 | File | Untuk | Isi |
 |---|---|---|
 | `deploy/docker/.env` | **Build-time** frontend | `VITE_API_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY` |
-| `backend/.env` | **Runtime** backend | `SUPABASE_SERVICE_ROLE_KEY` (rahasia), CORS |
+| `backend/.env` | **Runtime** backend | `SUPABASE_SERVICE_ROLE_KEY` (rahasia), `MAPIC_SERVICE_TOKEN` (rahasia), CORS |
 
 Salin `.env.example` menjadi `.env` dan isi nilainya:
 
@@ -74,13 +74,36 @@ cp .env.example .env && nano .env
 
 > `VITE_*` ditanam ke bundle saat build. Kalau IP server berubah, perbarui `.env` lalu build ulang hanya frontend (lihat di bawah).
 
+### Service API untuk Inkspire
+
+Endpoint `POST /api/service/generate` dipakai backend lokal Inkspire lewat LAN — tanpa login Supabase, tanpa menyimpan hasil di MaPic. Detail kontraknya ada di `API.md`.
+
+**Mengaktifkan.** Isi `MAPIC_SERVICE_TOKEN` di `backend/.env` dengan nilai acak, lalu restart backend (tanpa rebuild):
+
+```bash
+openssl rand -hex 32                     # salin hasilnya ke MAPIC_SERVICE_TOKEN
+docker compose restart backend
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  -X POST http://127.0.0.1:8281/api/service/generate \
+  -H "Authorization: Bearer $MAPIC_SERVICE_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"prompt":"probe"}'
+```
+
+Token tidak diset atau kosong → endpoint service membalas `503` (fail closed) dan endpoint pengguna tetap normal. Jangan taruh token di repository, `deploy/docker/.env`, contoh request, atau frontend — hanya di `backend/.env` server (file itu tidak masuk git).
+
+**Merotasi.** Ganti nilai `MAPIC_SERVICE_TOKEN` di `backend/.env`, `docker compose restart backend`, lalu perbarui token di Inkspire. Tidak ada masa transisi dua token: sesi lama langsung ditolak `401`.
+
+**Rollback.** Kosongkan `MAPIC_SERVICE_TOKEN` dan restart backend — route service tertutup (`503`) tanpa menyentuh endpoint pengguna. Perubahan kode bisa dikembalikan lewat revert commit di branch `feat/service-api`.
+
+> **LAN/HTTPS.** Bearer token lewat HTTP polos bisa disadap di jaringan. Untuk LAN yang tidak sepenuhnya dipercaya, taruh reverse proxy HTTPS di depan backend (`8281`) dan pastikan timeout-nya tidak memotong generation lebih cepat dari timeout backend (3600 detik). CORS bukan pengganti autentikasi dan bukan firewall.
+
 ## Perubahan yang sering dilakukan
 
 **Ganti port** — ubah baris `ports:` layanan terkait di `docker-compose.yml`, lalu `docker compose up -d`.
 
 **Ganti model atau kuantisasi** — taruh file baru di `~/project_AI/qwen21-gguf/`, lalu ubah `QWEN_GGUF_NAME` (atau `QWEN_CLIP_NAME` / `QWEN_VAE_NAME`) pada layanan `qwen-image` di `docker-compose.yml`, dan `docker compose up -d qwen-image`. Tidak perlu build ulang image apa pun.
 
-**Aktifkan 2K** — set `QWEN_MAX_RESOLUTION: "2048"` pada `qwen-image`, dan longgarkan `frontend` (selector resolusi saat ini disembunyikan).
+**Aktifkan 2K** — set `QWEN_MAX_RESOLUTION: "2048"` pada **dua** layanan: `qwen-image` (facade) dan `backend` (gerbang endpoint service), lalu `docker compose up -d qwen-image backend`; longgarkan `frontend` juga (selector resolusi saat ini disembunyikan). Kalau hanya `qwen-image` yang diubah, endpoint pengguna mengikuti facade, tetapi endpoint service tetap menolak `2048` dengan `422`.
 
 **Ganti CORS** — `backend/.env`, lalu `docker compose restart backend`.
 

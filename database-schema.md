@@ -191,4 +191,4 @@ using (
 - Active/queued generation state is in backend memory only and is not stored in Supabase.
 - Kolom `created_at` nullable di DB walau semua baris terisi; constraint NOT NULL tidak dipasang. Index `generations_user_created_at_idx` **tidak bisa diverifikasi** lewat PostgREST — cek di dashboard Supabase (Database → Indexes) bila perlu.
 - Kebijakan RLS juga tidak terbaca lewat PostgREST karena service role melewatinya. Bagian "Recommended RLS Policies" di bawah adalah usulan, belum tentu yang terpasang.
-- `DELETE /api/history/{id}` deletes by generation ID only; it does not verify the row belongs to the requesting user. This is safe only if the backend route is otherwise protected or trusted. Consider changing the API to require `user_id` ownership validation before deletion.
+- `DELETE /api/history/{id}` memverifikasi kepemilikan lewat token: baris milik user lain tampak sebagai `404` (bukan terhapus, bukan `403`). Route service (`POST /api/service/generate`) tidak pernah menyentuh tabel ini.

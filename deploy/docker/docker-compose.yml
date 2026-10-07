@@ -76,6 +76,8 @@ services:
     environment:
       QWEN_IMAGE_API_URL: http://qwen-image:30000
       QWEN_DEFAULT_RESOLUTION: "1024"
+      # Batas resolusi endpoint service; harus sama dengan milik qwen-image.
+      QWEN_MAX_RESOLUTION: "1024"
       # Model cutout dibaca dari disk, tidak diunduh saat request. Layout di
       # dalam mount harus <REMBG_HOME>/models/<nama>/<nama>.onnx.
       REMBG_HOME: /models

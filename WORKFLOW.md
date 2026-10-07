@@ -85,12 +85,15 @@ Model dimuat ulang setiap kali container `comfyui` restart — termasuk setelah 
 | Aturan | Nilai | Perilaku saat dilanggar |
 |---|---|---|
 | Generasi bersamaan | 1 | Job berikutnya `queued` |
-| Antrean global | 10 job | HTTP **429** dengan pesan yang jelas |
+| Antrean global | 10 job, gabungan jalur pengguna dan service | HTTP **429** dengan pesan yang jelas |
 | Cutout Remove Background bersamaan | 1 per proses backend, lock sendiri | HTTP **429** tanpa masuk antrean Qwen |
-| Referensi per request | 10 (Create) / 1 (Remove Background) | Validasi request menolak |
-| Resolusi | 1024 untuk Generate; cutout mengikuti ukuran sumber, sisi maksimal 2048 px | HTTP **400** (bukan OOM) untuk Generate; 422 untuk cutout |
+| Referensi per request | 10 (Create dan service) / 1 (Remove Background) | Validasi request menolak |
+| Resolusi | 1024 untuk Generate dan service; cutout mengikuti ukuran sumber, sisi maksimal 2048 px | **422** (skema) untuk nilai di luar 1024/2048; 2048 di host 1K ditolak facade dan diteruskan sebagai **502** untuk Generate pengguna; **422** untuk cutout dan service |
+| Gambar referensi service | 2 MiB / sisi 2048 px / 4,19 MP per gambar, body request 32 MiB | **413/422** sebelum inference |
 
 Validasi request terjadi **sebelum** job masuk antrean. Jadi request yang salah bentuk tidak "memakan" slot antrean dan tidak membuat pengguna lain menunggu lebih lama.
+
+**Service API (Inkspire).** `POST /api/service/generate` (Bearer `MAPIC_SERVICE_TOKEN` dari `backend/.env`) memakai antrean dan lock yang sama dengan jalur pengguna, tetapi stateless: tidak menulis riwayat, tidak mengunggah Storage, dan tidak muncul di `GET /api/generations/active`. Token kosong mematikan route ini dengan `503`; endpoint pengguna tidak terpengaruh. Penghitung antrean hanya berlaku per proses backend — satu container, satu worker uvicorn. Kontrak lengkapnya di `API.md`.
 
 ---
 
@@ -100,7 +103,7 @@ Validasi request terjadi **sebelum** job masuk antrean. Jadi request yang salah 
 2. Baris ditulis ke `public.generations`, dan frontend menampilkan `public_url`.
 3. Menghapus item riwayat menghapus **objek storage lebih dulu**, baru baris database — supaya tidak ada baris yang menunjuk ke gambar yang sudah hilang.
 
-Catatan: endpoint hapus saat ini bekerja berdasarkan `id` saja tanpa memverifikasi pemiliknya. Lihat "Notes And Gaps" di `database-schema.md`.
+Catatan: penghapusan memakai identitas dari token (`sub`) — baris milik user lain tampak sebagai `404`, dan membaca riwayat milik user lain ditolak `403`. Jalur service (`POST /api/service/generate`) tidak menulis riwayat maupun Storage sama sekali.
 
 **Label riwayat cutout.** Hasil Remove Background menyimpan judul di kolom `prompt` yang sama: `Remove background` atau `Remove background — <nama sumber>`. Nama sumber berasal dari nama berkas unggahan, atau dari prompt gambar sumber bila pengguna memilihnya dari riwayat (prefiks cutout dilepas agar tidak berantai). Server membersihkan label (karakter kontrol → spasi, spasi dirapatkan, dipotong 80 karakter) dan menyimpannya sebagai **tampilan saja** — tidak pernah dipakai untuk path Storage, header, atau nama berkas. Tidak ada kolom baru, jadi baris lama tetap terbaca apa adanya.
 
@@ -223,7 +226,7 @@ docker compose exec comfyui python -c "import torch; print(torch.cuda.get_device
 | Generasi pertama 50 detik | Model baru dimuat | Normal; job kedua kembali ~32 detik |
 | `{"status":"unloaded"}` di health | Model dikosongkan setelah idle | Normal; job berikutnya memuat ulang |
 | HTTP 429 | Antrean global penuh (10 job) | Tunggu; indikator kanan bawah menunjukkan posisinya |
-| HTTP 400 soal resolusi | Diminta 2K | Host ini 1K; ubah `QWEN_MAX_RESOLUTION` hanya bila VRAM mencukupi |
+| HTTP 422/502 soal resolusi | Diminta 2K di host 1K | Skema menolak nilai selain 1024/2048 dengan 422; 2048 diteruskan ke facade dan kembali sebagai 502 (endpoint pengguna) atau 422 (service). Ubah `QWEN_MAX_RESOLUTION` di `qwen-image` **dan** `backend` hanya bila VRAM mencukupi |
 | Layar putih di browser | Bundle lama di cache | Hard refresh (`Cmd+Shift+R`) |
 | Modal settings terpotong | Seharusnya sudah diperbaiki lewat portal ke `document.body` | Kalau muncul lagi, periksa `createPortal` di `PromptInput.tsx` |
 | GPU tidak terlihat container | NVIDIA Container Toolkit tidak terpasang | Lihat catatan GPU di `deploy/docker/README.md` |
