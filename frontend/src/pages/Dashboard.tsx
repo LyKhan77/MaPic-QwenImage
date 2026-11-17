@@ -47,6 +47,7 @@ export default function Dashboard({ session }: DashboardProps) {
   const [isViewingActiveGeneration, setIsViewingActiveGeneration] = useState(false)
   const [isNewGenerationDraft, setIsNewGenerationDraft] = useState(false)
   const [isRemovingBackground, setIsRemovingBackground] = useState(false)
+  const [isGpuMenuOpen, setIsGpuMenuOpen] = useState(false)
   // Mode cutout hidup di sini karena PromptInput dipasang dua tempat yang
   // saling menggantikan (terpusat dan bar bawah).
   const [removeBg, setRemoveBg] = useState(false)
@@ -74,6 +75,14 @@ export default function Dashboard({ session }: DashboardProps) {
       if (query.state.data === 'ready') return false
       return 10000
     },
+    refetchIntervalInBackground: false,
+  })
+
+  // Fetch GPU nodes + free VRAM (also polls while popover is open)
+  const { data: gpuInfo } = useQuery({
+    queryKey: ['gpu-nodes'],
+    queryFn: api.getGpuNodes,
+    refetchInterval: isGpuMenuOpen || modelStatus !== 'ready' ? 10000 : false,
     refetchIntervalInBackground: false,
   })
 
@@ -323,16 +332,25 @@ export default function Dashboard({ session }: DashboardProps) {
     setRemoveBg(false)
   }
 
-  const handleLoadModel = async () => {
+  const handleLoadModel = async (gpuId?: string) => {
     try {
       queryClient.setQueryData(['model-health'], 'loading')
       setLoadElapsed(0)
-      await api.loadModel()
-      queryClient.invalidateQueries({ queryKey: ['model-health'] })
+      await api.loadModel(gpuId)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['model-health'] }),
+        queryClient.invalidateQueries({ queryKey: ['gpu-nodes'] }),
+      ])
+      if (gpuId && gpuInfo?.active_gpu && gpuId !== gpuInfo.active_gpu) {
+        toast.success(`Switched model to GPU ${gpuId}`)
+      }
     } catch (e) {
       console.error(e)
-      queryClient.setQueryData(['model-health'], 'offline')
-      toast.error('Failed to load model')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['model-health'] }),
+        queryClient.invalidateQueries({ queryKey: ['gpu-nodes'] }),
+      ])
+      toast.error(e instanceof Error ? e.message : 'Failed to load model')
     }
   }
 
@@ -340,7 +358,10 @@ export default function Dashboard({ session }: DashboardProps) {
     try {
       queryClient.setQueryData(['model-health'], 'unloaded')
       await api.unloadModel()
-      queryClient.invalidateQueries({ queryKey: ['model-health'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['model-health'] }),
+        queryClient.invalidateQueries({ queryKey: ['gpu-nodes'] }),
+      ])
     } catch (e) {
       console.error(e)
     }
@@ -368,7 +389,15 @@ export default function Dashboard({ session }: DashboardProps) {
       <main className="flex flex-1 flex-col relative min-w-0 min-h-0">
         <div className="flex-1 relative min-h-0 flex flex-col">
            <div className="absolute right-4 top-16 z-50 flex flex-col items-end gap-2 md:right-6 md:top-4">
-             <ModelStatusBadge status={modelStatus} onLoad={handleLoadModel} onUnload={handleUnloadModel} elapsed={loadElapsed} />
+             <ModelStatusBadge
+               status={modelStatus}
+               onLoad={handleLoadModel}
+               onUnload={handleUnloadModel}
+               elapsed={loadElapsed}
+               gpuInfo={gpuInfo}
+               hasActiveGeneration={displayedGenerationCount > 0}
+               onOpenChange={setIsGpuMenuOpen}
+             />
              <GenerationStageBadge
                key={`stage-${genKey}`}
                isLoading={hasCurrentUserGenerationWork}
