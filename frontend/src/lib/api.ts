@@ -1,9 +1,11 @@
 import { supabase } from './supabase'
+import type { GpuNodeInfo, GpuNodesResponse } from './gpuNodes'
 
 const API_URL = import.meta.env.VITE_API_URL
   || `http://${window.location.hostname}:8281/api`
 
 export type ModelStatus = 'ready' | 'loading' | 'offline' | 'unloaded'
+export type { GpuNodeInfo, GpuNodesResponse }
 
 // Backend memverifikasi token Supabase dan mengambil identitas user dari claim
 // `sub`; user_id yang dikirim klien tidak pernah dipercaya.
@@ -27,9 +29,32 @@ export const api = {
     }
   },
 
-  async loadModel() {
-    const res = await fetch(`${API_URL}/load`, { method: 'POST', headers: await authHeaders() })
-    if (!res.ok) throw new Error('Failed to load model')
+  async getGpuNodes(): Promise<GpuNodesResponse> {
+    try {
+      const res = await fetch(`${API_URL}/system/gpus`, { headers: await authHeaders() })
+      if (!res.ok) return { active_gpu: null, default_gpu: null, gpus: [] }
+      return res.json()
+    } catch {
+      return { active_gpu: null, default_gpu: null, gpus: [] }
+    }
+  },
+
+  async loadModel(gpuId?: string) {
+    const res = await fetch(`${API_URL}/load`, {
+      method: 'POST',
+      headers: await authHeaders(Boolean(gpuId)),
+      ...(gpuId ? { body: JSON.stringify({ gpu_id: gpuId }) } : {}),
+    })
+    if (!res.ok) {
+      let message = 'Failed to load model'
+      try {
+        const err = await res.json()
+        if (err?.detail) message = err.detail
+      } catch {
+        // ignore JSON parse error
+      }
+      throw new Error(message)
+    }
     return res.json()
   },
 

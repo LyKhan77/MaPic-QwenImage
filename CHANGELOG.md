@@ -5,6 +5,32 @@ setiap entri memuat konteks, daftar berkas yang berubah, bukti, dampak, dan cara
 
 > Catatan: berkas ini dibuat pada 2026-09-23. Commit-commit sebelumnya belum punya entri.
 
+### 2026-11-17 — `feat: dynamic GPU node selector on Load Model`
+
+**Konteks.** Untuk mendukung server multi-GPU (khususnya `gspe-ai3` yang memiliki RTX 5080 pada index `1` dan `2`, dengan default index `2`), pemilihan GPU tidak lagi terkunci ke satu GPU yang di-hardcode di compose. Karena ComfyUI standar mengikat satu device CUDA saat start dan `ComfyUI-GGUF` / *dynamic VRAM loading* berisiko *device mismatch* pada node MultiGPU, dipilih arsitektur **multi-worker ComfyUI per GPU + routing dinamis di facade**.
+
+**Yang berubah.**
+
+| Berkas | Perubahan |
+|---|---|
+| `qwen_image_server/main.py` | Menambahkan `_parse_gpu_workers` (`QWEN_GPU_WORKERS`, `QWEN_DEFAULT_GPU`, fallback ke `COMFY_BASE_URL`), `GET /v1/system/gpus` (mengambil nama GPU dan VRAM bebas real-time dari `/system_stats` tiap worker), perluasan `POST /v1/system/load` dengan `{"gpu_id": ...}` opsional (cek worker target online sebelum melepas `/free` worker lama, tolak `409` saat generasi aktif), serta field `gpu` di `/health` dan `/v1/system/load/state`. |
+| `qwen_image_server/tests/test_gpu_nodes.py` | Baru. 10 unit test mock untuk parsing env, fallback single-GPU, probe `/v1/system/gpus`, switch GPU, guard `409`, `400` untuk `gpu_id` tak dikenal, dan `502` saat worker target offline tanpa melepas GPU aktif. |
+| `backend/schemas.py`, `backend/services/qwen_image_service.py`, `backend/main.py` | Tambah `LoadModelRequest`, `QwenImageRequestError`, `get_gpu_nodes()`, `GET /api/system/gpus`, dan dukungan `gpu_id` opsional pada `POST /api/load` (tetap menerima POST tanpa body). |
+| `backend/tests/test_gpu_nodes.py` | Baru. 6 tes mock untuk auth `/api/system/gpus`, forwarding daftar GPU, `POST /api/load` kosong vs `gpu_id`, validasi `422` spasi, dan forwarding `409`. |
+| `frontend/src/lib/gpuNodes.ts`, `frontend/src/lib/api.ts`, `frontend/src/components/ModelStatusBadge.tsx`, `frontend/src/pages/Dashboard.tsx` | Tag GPU aktif pada badge model, popover pemilih node GPU (nama kartu, sisa VRAM, status Default/Loaded/Offline, tombol Load/Switch/Unload), terkunci saat loading atau ada generasi aktif. |
+| `frontend/scripts/check-gpu-nodes-ui.mjs`, `frontend/package.json` | Cek helper `gpuNodes.ts` (`npm run check:gpu-nodes`). |
+| `deploy/docker/docker-compose.yml`, `deploy/docker/.env.example` | Tambah service `comfyui-gpu2` dengan Docker Compose `profiles: ["multi-gpu"]` (`NVIDIA_VISIBLE_DEVICES=${COMFY_GPU_2:-2}`, port debug `127.0.0.1:8189:8188`) serta env `QWEN_GPU_WORKERS` dan `QWEN_DEFAULT_GPU`. |
+| `API.md`, `deploy/docker/README.md`, `ARCHITECTURE.md`, `WORKFLOW.md`, `AGENTS.md`, `CLAUDE.md` | Dokumentasi endpoint, konfigurasi multi-GPU (`gspe-ai3` default node `2`), dan alur operasional. |
+
+**Bukti (lokal).**
+- `backend/.venv/bin/python -m unittest discover -s qwen_image_server/tests -v` → `Ran 10 tests in 0.056s` `OK`.
+- `SUPABASE_URL=https://example.supabase.co SUPABASE_SERVICE_ROLE_KEY=test backend/.venv/bin/python -m unittest discover -s backend/tests -v` → `Ran 93 tests in 0.500s` `OK` (6 tes baru + 87 tes lama).
+- `cd frontend && npm run check:gpu-nodes` → `gpuNodes: formatVramGb, formatGpuShortName, canSelectGpuNode OK`.
+- `cd frontend && npx eslint src/components/ModelStatusBadge.tsx src/pages/Dashboard.tsx src/lib/api.ts src/lib/gpuNodes.ts` → exit 0 (0 errors, 0 warnings pada berkas yang diubah).
+- `cd frontend && npm run build` → `✓ 2222 modules transformed.` `✓ built in 1.80s`.
+
+**Dampak & rollback.** Host single-GPU (`gspe-ai2`) tetap berjalan seperti sebelumnya tanpa menyalakan profile `multi-gpu`. Untuk server `gspe-ai3`, aktifkan `COMPOSE_PROFILES=multi-gpu`, `QWEN_GPU_WORKERS=1=http://comfyui:8188,2=http://comfyui-gpu2:8188`, dan `QWEN_DEFAULT_GPU=2` di `deploy/docker/.env`. Rollback: kosongkan `QWEN_GPU_WORKERS` / matikan `COMPOSE_PROFILES` lalu `docker compose up -d`, atau kembali ke branch `main`.
+
 ### 2026-10-07 — `feat: add stateless service API for Inkspire`
 
 **Konteks.** Permintaan pengguna (spec `temp/prompt/mapic-service-api.md`): aplikasi internal Inkspire — web app drawing/diagram local-first tanpa akun — perlu memakai model image generation MaPic tanpa login Supabase. Backend MaPic dijadikan batas akses: satu endpoint mesin-ke-mesin `POST /api/service/generate` dengan Bearer token dari environment backend, jalur stateless (tanpa history/Storage), berbagi antrean dan lock inference dengan endpoint pengguna. Facade dan ComfyUI tetap tidak diekspos; pemanggil yang benar adalah backend lokal Inkspire lewat LAN, bukan JavaScript browser.

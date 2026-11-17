@@ -146,7 +146,21 @@ ssh -L 8188:127.0.0.1:8188 gspe-ai2@192.168.2.142
 
 ## Catatan GPU
 
-`comfyui` dipin ke **GPU 1** lewat `runtime: nvidia` + `NVIDIA_VISIBLE_DEVICES=1`. GPU 0 tidak dipakai karena pernah lepas dari bus PCIe (Xid 79/154).
+`comfyui` dipin ke **GPU 1** lewat `runtime: nvidia` + `NVIDIA_VISIBLE_DEVICES=1`. GPU 0 di `gspe-ai2` tidak dipakai karena pernah lepas dari bus PCIe (Xid 79/154).
+
+### Mode Multi-GPU (misal `gspe-ai3`, default GPU 2)
+
+Di server dengan lebih dari satu GPU yang layak (seperti `gspe-ai3` dengan RTX 5080 pada index `1` dan `2`), worker kedua `comfyui-gpu2` bisa diaktifkan tanpa mengganggu host single-GPU lewat Docker Compose profile `multi-gpu`. Tambahkan di `deploy/docker/.env`:
+
+```env
+COMPOSE_PROFILES=multi-gpu
+COMFY_GPU_1=1
+COMFY_GPU_2=2
+QWEN_GPU_WORKERS=1=http://comfyui:8188,2=http://comfyui-gpu2:8188
+QWEN_DEFAULT_GPU=2
+```
+
+Lalu jalankan `docker compose up -d`. Facade `qwen-image` akan memakai GPU 2 secara default dan UI pada `ModelStatusBadge` menampilkan popover daftar GPU + VRAM bebas real-time untuk berpindah node (hanya bisa diganti saat tidak ada generasi yang sedang berjalan).
 
 Jalur runtime dipilih karena Docker di host ini memakai CDI untuk `--gpus` dan vendor spec-nya belum lengkap, sementara `daemon.json` sudah memuat entri runtime `nvidia` sehingga jalur ini langsung bekerja.
 

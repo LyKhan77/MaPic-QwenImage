@@ -71,8 +71,8 @@ kosong ──(job pertama)──► dimuat ──(1 jam idle)──► dikosongk
           ~18 detik              otomatis
 ```
 
-- **Auto-load:** tidak ada langkah manual. Job pertama memicu pemuatan; pengguna pertama menanggung waktunya (~50 detik, bukan 32).
-- **Warmup manual:** tombol load di badge status memicu satu step 256×256 lebih dulu supaya antrean berikutnya cepat.
+- **Auto-load:** tidak ada langkah manual. Job pertama memicu pemuatan pada node GPU aktif (default `QWEN_DEFAULT_GPU`); pengguna pertama menanggung waktunya (~50 detik, bukan 32).
+- **Warmup manual & ganti node GPU:** tombol load atau popover pada badge status (`ModelStatusBadge`) memicu satu step 256×256 pada GPU yang dipilih. Pada host multi-GPU, memilih GPU lain otomatis melepas VRAM worker GPU lama (`/free`) lalu memuat worker GPU target (diblokir `409` jika ada generasi aktif).
 - **Unload:** otomatis setelah 1 jam tanpa generasi, untuk membebaskan VRAM bagi proses lain di server. Bisa juga manual dari UI.
 - **Progres pemuatan:** facade melaporkan segmennya lewat `/v1/system/load/state`, dan frontend memulihkan tampilan itu setelah refresh.
 

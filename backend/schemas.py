@@ -51,6 +51,20 @@ class RemoveBackgroundRequest(BaseModel):
     source_label: str | None = Field(default=None, max_length=200)
 
 
+class LoadModelRequest(BaseModel):
+    gpu_id: str | None = Field(default=None, max_length=16)
+
+    @field_validator("gpu_id")
+    @classmethod
+    def gpu_id_not_blank(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("gpu_id must not be blank")
+        return cleaned
+
+
 class Generation(BaseModel):
     id: UUID
     user_id: UUID

@@ -108,11 +108,11 @@ Model resmi 31 GB tidak muat; Q8_0 (7,07 GiB) praktis setara bf16 secara kualita
 
 Menggantinya **tidak perlu build ulang image**: cukup taruh file di folder model dan ubah `QWEN_GGUF_NAME` di compose.
 
-### 4.3 Satu GPU, dipin ke device 1
+### 4.3 Pinning GPU per worker (dan routing multi-worker opsional)
 
-**Dipin**, bukan dibiarkan otomatis. GPU 0 pernah lepas dari bus PCIe (Xid 79, lalu Xid 154) sehingga tidak dipercaya untuk beban produksi. Pinning dilakukan lewat `NVIDIA_VISIBLE_DEVICES` pada container.
+Setiap worker ComfyUI dipin ke satu GPU lewat `NVIDIA_VISIBLE_DEVICES`. Di `gspe-ai2`, GPU 0 pernah lepas dari bus PCIe (Xid 79, lalu Xid 154) sehingga hanya GPU 1 yang dipakai. Di server multi-GPU seperti `gspe-ai3`, beberapa worker ComfyUI (`comfyui` pada GPU 1, `comfyui-gpu2` pada GPU 2 via profile `multi-gpu`) dapat dijalankan bersamaan dalam keadaan idle (0 MB VRAM sampai dimuat), dan facade (`qwen-image`) merutekan beban ke node aktif yang dipilih dari UI (default node `2` di `gspe-ai3`).
 
-**Kenapa bukan multi-GPU?** Ini bukan keterbatasan model, melainkan keterbatasan engine: ComfyUI menempatkan satu model utuh di satu device. Stack yang mendukung sharding (diffusers, SGLang-Diffusion, vLLM-Omni) justru yang gagal di sini karena manajemen memorinya. Menambah GPU ke satu proses ComfyUI tidak akan mempercepat apa pun.
+**Kenapa tetap 1 model penuh per worker (bukan tensor sharding)?** Ini keterbatasan engine: ComfyUI menempatkan satu model utuh di satu device. Menjalankan satu worker per GPU menjaga kompatibilitas penuh dengan `UnetLoaderGGUF`, `TextEncodeQwenImage21`, dan *dynamic VRAM loading* ComfyUI tanpa risiko *device mismatch*, sekaligus melepas VRAM GPU lama secara bersih lewat `/free` saat pengguna berpindah node dari UI.
 
 ### 4.4 Docker menggantikan systemd
 

@@ -7,7 +7,7 @@ from io import BytesIO
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
@@ -17,9 +17,9 @@ import uvicorn.logging
 try:
     from backend.auth import require_service_token, require_user
     from backend.config import CORS_ORIGINS, QWEN_IMAGE_API_URL, QWEN_MAX_RESOLUTION
-    from backend.schemas import ActiveGeneration, GenerateRequest, Generation, RemoveBackgroundRequest, ServiceGenerateRequest, ServiceImageResponse
+    from backend.schemas import ActiveGeneration, GenerateRequest, Generation, LoadModelRequest, RemoveBackgroundRequest, ServiceGenerateRequest, ServiceImageResponse
     from backend.services import remove_background_service
-    from backend.services.qwen_image_service import QwenImageError, QwenImageTimeoutError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model
+    from backend.services.qwen_image_service import QwenImageError, QwenImageRequestError, QwenImageTimeoutError, generate_image_bytes, get_generation_status, get_gpu_nodes, get_health_status, get_load_state, load_model, unload_model
     from backend.services.supabase_service import (
         GenerationNotFound,
         SupabaseError,
@@ -32,9 +32,9 @@ try:
 except ModuleNotFoundError:
     from auth import require_service_token, require_user
     from config import CORS_ORIGINS, QWEN_IMAGE_API_URL, QWEN_MAX_RESOLUTION
-    from schemas import ActiveGeneration, GenerateRequest, Generation, RemoveBackgroundRequest, ServiceGenerateRequest, ServiceImageResponse
+    from schemas import ActiveGeneration, GenerateRequest, Generation, LoadModelRequest, RemoveBackgroundRequest, ServiceGenerateRequest, ServiceImageResponse
     from services import remove_background_service
-    from services.qwen_image_service import QwenImageError, QwenImageTimeoutError, generate_image_bytes, get_generation_status, get_health_status, get_load_state, load_model, unload_model
+    from services.qwen_image_service import QwenImageError, QwenImageRequestError, QwenImageTimeoutError, generate_image_bytes, get_generation_status, get_gpu_nodes, get_health_status, get_load_state, load_model, unload_model
     from services.supabase_service import (
         GenerationNotFound,
         SupabaseError,
@@ -196,11 +196,22 @@ async def api_health():
     return {"status": status}
 
 
-@app.post("/api/load")
-async def api_load(_: UUID = Depends(require_user)):
+@app.get("/api/system/gpus")
+async def api_system_gpus(_: UUID = Depends(require_user)):
     try:
-        result = await load_model()
+        return await get_gpu_nodes()
+    except Exception as exc:
+        logger.warning("GPU list check failed: %s", exc)
+        return {"active_gpu": None, "default_gpu": None, "gpus": []}
+
+
+@app.post("/api/load")
+async def api_load(payload: LoadModelRequest | None = Body(default=None), _: UUID = Depends(require_user)):
+    try:
+        result = await load_model(payload.gpu_id if payload else None)
         return result
+    except QwenImageRequestError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

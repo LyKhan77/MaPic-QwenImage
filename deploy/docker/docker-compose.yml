@@ -33,8 +33,34 @@ services:
     # (restart akan mematikan seluruh container project lain).
     runtime: nvidia
     environment:
-      # GPU 1 saja: GPU 0 pernah lepas dari bus (Xid 79/154).
-      NVIDIA_VISIBLE_DEVICES: "1"
+      # GPU 1 saja secara default: GPU 0 di gspe-ai2 pernah lepas dari bus (Xid 79/154).
+      NVIDIA_VISIBLE_DEVICES: "${COMFY_GPU_1:-1}"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8188/system_stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+
+  # Worker GPU tambahan (opsional untuk server multi-GPU seperti gspe-ai3).
+  # Aktifkan lewat COMPOSE_PROFILES=multi-gpu di deploy/docker/.env.
+  comfyui-gpu2:
+    profiles: ["multi-gpu"]
+    build:
+      context: ./comfyui
+    image: mapic/comfyui:qwen21
+    restart: unless-stopped
+    volumes:
+      - ${MODELS_DIR:-/home/gspe-ai2/project_AI/qwen21-gguf}:/models:ro
+      - comfyui-gpu2-input:/opt/ComfyUI/input
+      - comfyui-gpu2-output:/opt/ComfyUI/output
+      - comfyui-gpu2-temp:/opt/ComfyUI/temp
+    ports:
+      - "127.0.0.1:8189:8188"
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "${COMFY_GPU_2:-2}"
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8188/system_stats"]
@@ -52,6 +78,8 @@ services:
     restart: unless-stopped
     environment:
       COMFY_BASE_URL: http://comfyui:8188
+      QWEN_GPU_WORKERS: ${QWEN_GPU_WORKERS:-}
+      QWEN_DEFAULT_GPU: ${QWEN_DEFAULT_GPU:-}
       QWEN_MAX_RESOLUTION: "1024"
       PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
       # Nama file model di dalam folder yang di-mount ke ComfyUI.
@@ -108,3 +136,6 @@ volumes:
   comfyui-input:
   comfyui-output:
   comfyui-temp:
+  comfyui-gpu2-input:
+  comfyui-gpu2-output:
+  comfyui-gpu2-temp:
