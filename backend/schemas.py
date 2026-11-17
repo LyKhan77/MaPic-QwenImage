@@ -51,6 +51,10 @@ class RemoveBackgroundRequest(BaseModel):
     source_label: str | None = Field(default=None, max_length=200)
 
 
+class ServiceRemoveBackgroundRequest(BaseModel):
+    image: str  # base64 PNG atau JPEG, tanpa prefiks data-URL
+
+
 class LoadModelRequest(BaseModel):
     gpu_id: str | None = Field(default=None, max_length=16)
 

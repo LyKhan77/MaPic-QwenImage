@@ -5,6 +5,31 @@ setiap entri memuat konteks, daftar berkas yang berubah, bukti, dampak, dan cara
 
 > Catatan: berkas ini dibuat pada 2026-09-23. Commit-commit sebelumnya belum punya entri.
 
+### 2026-11-17 — `feat: MCP server and Connect MCP UI`
+
+**Konteks.** Pengguna ingin menghubungkan AI agent ke tool Image Generator dan Background Remover MaPic lewat MCP, sekaligus menyediakan UI berisi prompt siap-salin & config JSON baik di Dashboard (Sidebar) maupun di Login Screen (tanpa harus login dulu).
+
+**Yang berubah.**
+
+| Berkas | Perubahan |
+|---|---|
+| `backend/schemas.py`, `backend/main.py` | Ekstrak helper bersama `_raise_service_validation_error`, `_run_service_generation`, dan `_run_cutout_bytes`; tambah endpoint stateless `POST /api/service/remove-background` (`require_service_token`, antrean cutout CPU terpisah) serta mount `POST /mcp` (`require_service_token`) dan `GET /mcp` (`405`). |
+| `backend/mcp_server.py` | Baru. Server MCP Streamable HTTP JSON-RPC 2.0 tanpa dependensi baru (`initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`) untuk tool `generate_image`, `remove_background`, dan `get_model_status`. |
+| `backend/tests/test_mcp_server.py` | Baru. 13 unit test mock untuk `/api/service/remove-background` (503 fail closed, 401, validasi, 429 busy, sukses tanpa Supabase) dan seluruh metode MCP (`initialize`, `tools/list`, `tools/call`, error `isError`, `GET /mcp` 405). |
+| `frontend/src/lib/mcpPrompt.ts`, `frontend/src/components/ConnectMcpModal.tsx` | Helper murni dan modal portal `Connect MCP` dengan preset (`All Tools`, `Image Generator`, `Background Remover`), input URL & token opsional di memori browser, tab `Agent Prompt` & `MCP Config (JSON)`, serta copy dengan fallback HTTP LAN. |
+| `frontend/src/components/Sidebar.tsx`, `frontend/src/pages/Login.tsx` | Menempatkan tombol `Connect MCP` di atas user footer pada Sidebar (mendukung desktop collapsed & mobile drawer) dan tombol `Connect Agent via MCP` pada Login Screen. |
+| `frontend/scripts/check-mcp-ui.mjs`, `frontend/package.json` | Cek helper `mcpPrompt.ts` dan wiring Sidebar/Login (`npm run check:mcp`). |
+| `API.md`, `README.md`, `AGENTS.md`, `CLAUDE.md` | Dokumentasi `/api/service/remove-background`, `/mcp`, dan `ConnectMcpModal`. |
+
+**Bukti (lokal).**
+- `backend/.venv/bin/python -m unittest discover -s qwen_image_server/tests -v` → `Ran 10 tests in 0.027s` `OK`.
+- `SUPABASE_URL=https://example.supabase.co SUPABASE_SERVICE_ROLE_KEY=test backend/.venv/bin/python -m unittest discover -s backend/tests -v` → `Ran 106 tests in 0.363s` `OK` (13 tes baru + 93 tes lama).
+- `cd frontend && npm run check:mcp` → `mcpPrompt: endpoint URL, config JSON, presets, and Sidebar/Login wiring OK`.
+- `cd frontend && npx eslint src/components/ConnectMcpModal.tsx src/components/Sidebar.tsx src/lib/mcpPrompt.ts` → exit 0 (`Login.tsx:47` tetap punya 1 error `any` pra-eksisting).
+- `cd frontend && npm run build` → `✓ 2224 modules transformed.` `✓ built in 1.63s`.
+
+**Dampak & rollback.** Jalur MCP dan `/api/service/remove-background` memakai `MAPIC_SERVICE_TOKEN` dan fail closed (`503`) bila token env kosong; token asli tidak pernah dikirim ke browser. Rollback: kosongkan `MAPIC_SERVICE_TOKEN` di `backend/.env` lalu `docker compose up -d backend`, atau revert commit pada branch `feat/mcp-server`.
+
 ### 2026-11-17 — `feat: dynamic GPU node selector on Load Model`
 
 **Konteks.** Untuk mendukung server multi-GPU (khususnya `gspe-ai3` yang memiliki RTX 5080 pada index `1` dan `2`, dengan default index `2`), pemilihan GPU tidak lagi terkunci ke satu GPU yang di-hardcode di compose. Karena ComfyUI standar mengikat satu device CUDA saat start dan `ComfyUI-GGUF` / *dynamic VRAM loading* berisiko *device mismatch* pada node MultiGPU, dipilih arsitektur **multi-worker ComfyUI per GPU + routing dinamis di facade**.
