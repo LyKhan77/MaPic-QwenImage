@@ -4,12 +4,13 @@ import io
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import Image
 from pydantic import BaseModel
@@ -19,10 +20,50 @@ from workflows import build_i2i, build_t2i
 
 logger = logging.getLogger("qwen_image_server")
 
+
+def _parse_gpu_workers(
+    workers_env: str,
+    default_env: str,
+    fallback_url: str,
+) -> tuple[dict[str, ComfyClient], str]:
+    """Petakan `id=url` dari env menjadi klien ComfyUI per node GPU."""
+    parsed: dict[str, ComfyClient] = {}
+    for entry in (workers_env or "").split(","):
+        item = entry.strip()
+        if not item or "=" not in item:
+            continue
+        gpu_id, url = item.split("=", 1)
+        gpu_id = gpu_id.strip()
+        url = url.strip()
+        if gpu_id and url:
+            parsed[gpu_id] = ComfyClient(url)
+
+    preferred_default = (default_env or "").strip()
+    if not parsed:
+        fallback_id = preferred_default or "1"
+        parsed[fallback_id] = ComfyClient(fallback_url)
+        return parsed, fallback_id
+
+    default_id = preferred_default if preferred_default in parsed else next(iter(parsed))
+    return parsed, default_id
+
+
+def _parse_gpu_name(raw_name: str) -> str:
+    cleaned = re.sub(r"^cuda:\d+\s+", "", raw_name or "").strip()
+    cleaned = re.sub(r"\s*:\s*.*$", "", cleaned).strip()
+    return cleaned or "CUDA GPU"
+
+
 # ComfyUI yang menjalankan Qwen-Image 2.1 GGUF. Facade ini mempertahankan kontrak
 # API lama (T2I/I2I, load/unload, stage tracking) supaya backend dan frontend
-# tidak perlu diubah.
-comfy = ComfyClient(os.getenv("COMFY_BASE_URL", "http://127.0.0.1:8188"))
+# tidak perlu diubah, sekaligus mendukung routing ke lebih dari satu worker GPU.
+workers, DEFAULT_GPU_ID = _parse_gpu_workers(
+    os.getenv("QWEN_GPU_WORKERS", ""),
+    os.getenv("QWEN_DEFAULT_GPU", ""),
+    os.getenv("COMFY_BASE_URL", "http://127.0.0.1:8188"),
+)
+active_gpu_id = DEFAULT_GPU_ID
+comfy = workers[active_gpu_id]
 _executor_lock = asyncio.Lock()
 _inference_lock = asyncio.Lock()
 
@@ -70,21 +111,42 @@ async def _warmup():
     await comfy.run(graph)
 
 
-async def load_model():
+class WorkerOfflineError(Exception):
+    pass
+
+
+async def load_model(gpu_id: str | None = None):
     """Pramuat model ke VRAM ComfyUI (ComfyUI memuat model saat job pertama)."""
-    global is_loading, is_unloaded
+    global is_loading, is_unloaded, active_gpu_id, comfy
     if is_loading:
         return
+    target_gpu = gpu_id or active_gpu_id
+    target_worker = workers[target_gpu]
     is_loading = True
     try:
-        update_progress(10, "Menghubungi ComfyUI...")
-        await comfy.system_stats()
-        update_progress(20, "Memuat model ke VRAM...")
+        update_progress(10, f"Menghubungi ComfyUI (GPU {target_gpu})...")
+        try:
+            await target_worker.system_stats()
+        except Exception as exc:
+            raise WorkerOfflineError(f"ComfyUI GPU {target_gpu} tidak dapat dijangkau: {exc}") from exc
+
+        if target_gpu != active_gpu_id:
+            if not is_unloaded:
+                update_progress(15, f"Melepas model dari GPU {active_gpu_id}...")
+                try:
+                    await comfy.free(unload_models=True, free_memory=True)
+                except Exception as exc:
+                    logger.warning("Gagal melepas VRAM GPU %s sebelumnya: %s", active_gpu_id, exc)
+            active_gpu_id = target_gpu
+            comfy = target_worker
+            is_unloaded = True
+
+        update_progress(20, f"Memuat model ke VRAM (GPU {target_gpu})...")
         await _warmup()
         is_unloaded = False
         update_progress(95, "Finalizing...")
         update_progress(100, "Ready.")
-        logger.info("Model siap di VRAM.")
+        logger.info("Model siap di VRAM (GPU %s).", target_gpu)
     except Exception as exc:
         update_progress(0, f"Error: {exc}")
         logger.exception("Gagal memuat model")
@@ -97,7 +159,7 @@ async def unload_model():
     global is_unloaded
     await comfy.free(unload_models=True, free_memory=True)
     is_unloaded = True
-    logger.info("Model dilepas dari VRAM.")
+    logger.info("Model dilepas dari VRAM (GPU %s).", active_gpu_id)
 
 
 def _mark_loaded():
@@ -122,6 +184,10 @@ class _QuietPollingFilter(logging.Filter):
         return True
 
 logging.getLogger("uvicorn.access").addFilter(_QuietPollingFilter())
+
+
+class LoadModelRequest(BaseModel):
+    gpu_id: str | None = None
 
 
 class T2IRequest(BaseModel):
@@ -187,12 +253,47 @@ def _b64_to_pil(b64: str) -> Image.Image:
 @app.get("/health")
 async def health():
     if is_loading:
-        return {"status": "loading"}
+        return {"status": "loading", "gpu": active_gpu_id}
     try:
         await comfy.system_stats()
     except Exception:
-        return {"status": "offline"}
-    return {"status": "unloaded" if is_unloaded else "ready"}
+        return {"status": "offline", "gpu": active_gpu_id}
+    return {"status": "unloaded" if is_unloaded else "ready", "gpu": active_gpu_id}
+
+
+async def _probe_gpu_node(gpu_id: str, client: ComfyClient) -> dict:
+    info = {
+        "id": gpu_id,
+        "name": f"GPU {gpu_id}",
+        "vram_total_mb": 0,
+        "vram_free_mb": 0,
+        "online": False,
+        "loaded": gpu_id == active_gpu_id and not is_unloaded,
+        "active": gpu_id == active_gpu_id,
+        "default": gpu_id == DEFAULT_GPU_ID,
+    }
+    try:
+        stats = await client.system_stats(timeout=2.0)
+        devices = stats.get("devices") or []
+        cuda_dev = next((d for d in devices if d.get("type") == "cuda"), devices[0] if devices else None)
+        if cuda_dev:
+            info["name"] = _parse_gpu_name(cuda_dev.get("name", ""))
+            info["vram_total_mb"] = round(int(cuda_dev.get("vram_total") or 0) / (1024 * 1024))
+            info["vram_free_mb"] = round(int(cuda_dev.get("vram_free") or 0) / (1024 * 1024))
+        info["online"] = True
+    except Exception as exc:
+        logger.debug("Probe GPU %s gagal: %s", gpu_id, exc)
+    return info
+
+
+@app.get("/v1/system/gpus")
+async def list_gpu_nodes():
+    results = await asyncio.gather(*(_probe_gpu_node(gid, client) for gid, client in workers.items()))
+    return {
+        "active_gpu": active_gpu_id,
+        "default_gpu": DEFAULT_GPU_ID,
+        "gpus": list(results),
+    }
 
 
 @app.get("/v1/system/load/stream")
@@ -238,22 +339,33 @@ async def api_load_model_stream():
 
 
 @app.post("/v1/system/load")
-async def api_load_model():
+async def api_load_model(payload: LoadModelRequest | None = Body(default=None)):
     global last_request_time
-    await _executor_lock.acquire()
-    try:
-        await load_model()
-    finally:
-        _executor_lock.release()
+    target_gpu = payload.gpu_id.strip() if payload and payload.gpu_id else active_gpu_id
+    if target_gpu not in workers:
+        return JSONResponse(status_code=400, content={"error": f"Unknown GPU node: {target_gpu}"})
+    if is_loading and target_gpu != active_gpu_id:
+        return JSONResponse(status_code=409, content={"error": "Model is currently loading; cannot switch GPU right now"})
+    if _inference_lock.locked():
+        return JSONResponse(status_code=409, content={"error": "Cannot switch or load GPU while a generation is in progress"})
+
+    async with _inference_lock:
+        await _executor_lock.acquire()
+        try:
+            await load_model(target_gpu)
+        except (WorkerOfflineError, ComfyError) as exc:
+            return JSONResponse(status_code=502, content={"error": str(exc)})
+        finally:
+            _executor_lock.release()
     last_request_time = time.time()
-    return {"status": "ready"}
+    return {"status": "ready", "gpu": active_gpu_id}
 
 
 @app.post("/v1/system/unload")
 async def api_unload_model():
     if not is_unloaded:
         await unload_model()
-    return {"status": "unloaded"}
+    return {"status": "unloaded", "gpu": active_gpu_id}
 
 
 LOAD_SEGMENTS = [
@@ -277,14 +389,15 @@ async def api_load_state():
                     seg_progress = (loading_progress - lo) / max(1, hi - lo)
         return {
             "status": "loading",
+            "gpu": active_gpu_id,
             "segment_index": seg_index,
             "segment_progress": round(seg_progress, 2),
             "progress": loading_progress,
             "message": loading_message,
         }
     if not is_unloaded:
-        return {"status": "ready", "segment_index": 4, "segment_progress": 1.0, "progress": 100, "message": "Ready."}
-    return {"status": "unloaded", "segment_index": 0, "segment_progress": 0.0, "progress": 0, "message": ""}
+        return {"status": "ready", "gpu": active_gpu_id, "segment_index": 4, "segment_progress": 1.0, "progress": 100, "message": "Ready."}
+    return {"status": "unloaded", "gpu": active_gpu_id, "segment_index": 0, "segment_progress": 0.0, "progress": 0, "message": ""}
 
 
 @app.get("/v1/generations/status")
