@@ -20,6 +20,13 @@ class QwenImageError(Exception):
     pass
 
 
+class QwenImageRequestError(QwenImageError):
+    def __init__(self, status_code: int, detail: str):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
 class QwenImageTimeoutError(QwenImageError):
     """Timeout menunggu downstream.
 
@@ -53,12 +60,28 @@ async def get_health_status() -> str:
         logger.warning(f"Health check failed: {exc}")
         return "offline"
 
-async def load_model() -> dict:
+async def get_gpu_nodes() -> dict:
     url = QWEN_IMAGE_API_URL.rstrip("/")
-    async with httpx.AsyncClient(timeout=300) as client: # Timeout panjang untuk loading
-        resp = await client.post(f"{url}/v1/system/load")
-        resp.raise_for_status()
-        return resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{url}/v1/system/gpus")
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.warning("GPU node list check failed: %s", exc)
+        return {"active_gpu": None, "default_gpu": None, "gpus": []}
+
+
+async def load_model(gpu_id: str | None = None) -> dict:
+    url = QWEN_IMAGE_API_URL.rstrip("/")
+    kwargs = {"json": {"gpu_id": gpu_id}} if gpu_id is not None else {}
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:  # Timeout panjang untuk loading
+            resp = await client.post(f"{url}/v1/system/load", **kwargs)
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise QwenImageRequestError(exc.response.status_code, _error_detail(exc.response)) from exc
 
 async def unload_model() -> dict:
     url = QWEN_IMAGE_API_URL.rstrip("/")
