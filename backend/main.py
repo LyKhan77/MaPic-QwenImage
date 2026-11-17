@@ -7,7 +7,7 @@ from io import BytesIO
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import Body, Depends, FastAPI, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
@@ -17,7 +17,8 @@ import uvicorn.logging
 try:
     from backend.auth import require_service_token, require_user
     from backend.config import CORS_ORIGINS, QWEN_IMAGE_API_URL, QWEN_MAX_RESOLUTION
-    from backend.schemas import ActiveGeneration, GenerateRequest, Generation, LoadModelRequest, RemoveBackgroundRequest, ServiceGenerateRequest, ServiceImageResponse
+    from backend.mcp_server import handle_mcp_request
+    from backend.schemas import ActiveGeneration, GenerateRequest, Generation, LoadModelRequest, RemoveBackgroundRequest, ServiceGenerateRequest, ServiceImageResponse, ServiceRemoveBackgroundRequest
     from backend.services import remove_background_service
     from backend.services.qwen_image_service import QwenImageError, QwenImageRequestError, QwenImageTimeoutError, generate_image_bytes, get_generation_status, get_gpu_nodes, get_health_status, get_load_state, load_model, unload_model
     from backend.services.supabase_service import (
@@ -32,7 +33,8 @@ try:
 except ModuleNotFoundError:
     from auth import require_service_token, require_user
     from config import CORS_ORIGINS, QWEN_IMAGE_API_URL, QWEN_MAX_RESOLUTION
-    from schemas import ActiveGeneration, GenerateRequest, Generation, LoadModelRequest, RemoveBackgroundRequest, ServiceGenerateRequest, ServiceImageResponse
+    from mcp_server import handle_mcp_request
+    from schemas import ActiveGeneration, GenerateRequest, Generation, LoadModelRequest, RemoveBackgroundRequest, ServiceGenerateRequest, ServiceImageResponse, ServiceRemoveBackgroundRequest
     from services import remove_background_service
     from services.qwen_image_service import QwenImageError, QwenImageRequestError, QwenImageTimeoutError, generate_image_bytes, get_generation_status, get_gpu_nodes, get_health_status, get_load_state, load_model, unload_model
     from services.supabase_service import (
@@ -322,28 +324,17 @@ async def generate(payload: GenerateRequest, user_id: UUID = Depends(require_use
         _active_generations.pop(gen_id, None)
 
 
-@app.post("/api/service/generate", response_model=ServiceImageResponse)
-async def service_generate(request: Request, _: None = Depends(require_service_token)):
-    """Generate untuk klien mesin (backend lokal Inkspire): stateless, tanpa Supabase.
+def _raise_service_validation_error(exc: ValidationError) -> None:
+    """Format 422 mirip FastAPI tanpa menggemakan payload base64 yang ditolak."""
+    errors = exc.errors(include_url=False)
+    for error in errors:
+        error.pop("input", None)
+        error.pop("ctx", None)
+        error["loc"] = ("body", *error["loc"])
+    raise RequestValidationError(errors) from exc
 
-    Satu endpoint untuk T2I (tanpa `images`) dan I2I (dengan `images`), memakai
-    antrean admission dan lock inference yang sama dengan endpoint pengguna.
-    Hasil PNG dikembalikan langsung dan tidak disimpan di MaPic.
-    """
-    body = await _read_limited_body(request, MAX_SERVICE_REQUEST_BYTES)
-    try:
-        payload = ServiceGenerateRequest.model_validate_json(body)
-    except ValidationError as exc:
-        # Bentuk 422 disamakan dengan validasi FastAPI biasa (`loc` diawali
-        # "body", tanpa kunci `url`), tetapi nilai `input`/`ctx` dibuang supaya
-        # respons error tidak menggemakan payload base64 yang baru ditolak.
-        errors = exc.errors(include_url=False)
-        for error in errors:
-            error.pop("input", None)
-            error.pop("ctx", None)
-            error["loc"] = ("body", *error["loc"])
-        raise RequestValidationError(errors) from exc
 
+async def _run_service_generation(payload: ServiceGenerateRequest) -> bytes:
     if payload.resolution > QWEN_MAX_RESOLUTION:
         raise HTTPException(
             status_code=422,
@@ -375,7 +366,7 @@ async def service_generate(request: Request, _: None = Depends(require_service_t
                 info["started_at"] = time.time()
                 info["status"] = "running"
 
-            image_bytes = await generate_image_bytes(
+            return await generate_image_bytes(
                 payload.prompt,
                 payload.images,
                 payload.num_inference_steps,
@@ -383,7 +374,6 @@ async def service_generate(request: Request, _: None = Depends(require_service_t
                 payload.negative_prompt,
                 payload.resolution,
             )
-        return {"data": [{"b64_json": base64.b64encode(image_bytes).decode("utf-8")}]}
     except QwenImageTimeoutError as exc:
         # Pesan downstream bisa memuat detail internal; cukup di log server.
         logger.error("Service generation timed out: %s", exc)
@@ -398,13 +388,12 @@ async def service_generate(request: Request, _: None = Depends(require_service_t
         _active_generations.pop(job_id, None)
 
 
-@app.post("/api/remove-background", response_model=Generation)
-async def remove_background(payload: RemoveBackgroundRequest, user_id: UUID = Depends(require_user)):
-    if len(payload.image) > MAX_REMOVE_BACKGROUND_BASE64_CHARS:
+async def _run_cutout_bytes(encoded_image: str) -> bytes:
+    if len(encoded_image) > MAX_REMOVE_BACKGROUND_BASE64_CHARS:
         raise HTTPException(status_code=413, detail="Image payload too large")
 
     try:
-        raw = base64.b64decode(payload.image, validate=True)
+        raw = base64.b64decode(encoded_image, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise HTTPException(status_code=422, detail="Image is not valid base64") from exc
 
@@ -443,7 +432,7 @@ async def remove_background(payload: RemoveBackgroundRequest, user_id: UUID = De
 
     try:
         async with _remove_background_lock:
-            png_bytes = await asyncio.to_thread(remove_background_service.remove_background_png, raw)
+            return await asyncio.to_thread(remove_background_service.remove_background_png, raw)
     except remove_background_service.ModelUnavailableError as exc:
         # The worker's message embeds local weight paths; keep it in the log only.
         logger.exception("Remove background model unavailable")
@@ -451,6 +440,68 @@ async def remove_background(payload: RemoveBackgroundRequest, user_id: UUID = De
     except remove_background_service.RemoveBackgroundError as exc:
         logger.exception("Remove background worker failed")
         raise HTTPException(status_code=502, detail="Background removal failed") from exc
+
+
+@app.post("/api/service/generate", response_model=ServiceImageResponse)
+async def service_generate(request: Request, _: None = Depends(require_service_token)):
+    """Generate untuk klien mesin (backend lokal Inkspire): stateless, tanpa Supabase.
+
+    Satu endpoint untuk T2I (tanpa `images`) dan I2I (dengan `images`), memakai
+    antrean admission dan lock inference yang sama dengan endpoint pengguna.
+    Hasil PNG dikembalikan langsung dan tidak disimpan di MaPic.
+    """
+    body = await _read_limited_body(request, MAX_SERVICE_REQUEST_BYTES)
+    try:
+        payload = ServiceGenerateRequest.model_validate_json(body)
+    except ValidationError as exc:
+        _raise_service_validation_error(exc)
+
+    image_bytes = await _run_service_generation(payload)
+    return {"data": [{"b64_json": base64.b64encode(image_bytes).decode("utf-8")}]}
+
+
+@app.post("/api/service/remove-background", response_model=ServiceImageResponse)
+async def service_remove_background(request: Request, _: None = Depends(require_service_token)):
+    """Cutout CPU stateless untuk klien mesin dan MCP: tanpa Supabase, tidak menyentuh antrean GPU."""
+    body = await _read_limited_body(request, MAX_SERVICE_REQUEST_BYTES)
+    try:
+        payload = ServiceRemoveBackgroundRequest.model_validate_json(body)
+    except ValidationError as exc:
+        _raise_service_validation_error(exc)
+
+    png_bytes = await _run_cutout_bytes(payload.image)
+    return {"data": [{"b64_json": base64.b64encode(png_bytes).decode("utf-8")}]}
+
+
+async def _mcp_model_status() -> dict:
+    status, gpu_nodes = await asyncio.gather(get_health_status(), get_gpu_nodes())
+    return {
+        "status": status,
+        "max_resolution": QWEN_MAX_RESOLUTION,
+        **gpu_nodes,
+    }
+
+
+@app.post("/mcp")
+async def mcp_post(request: Request, _: None = Depends(require_service_token)):
+    body = await _read_limited_body(request, MAX_SERVICE_REQUEST_BYTES)
+    return await handle_mcp_request(
+        request,
+        raw_body=body,
+        run_generate=_run_service_generation,
+        run_remove_background=_run_cutout_bytes,
+        get_status=_mcp_model_status,
+    )
+
+
+@app.get("/mcp")
+async def mcp_get(_: None = Depends(require_service_token)):
+    return Response(status_code=405, headers={"Allow": "POST"})
+
+
+@app.post("/api/remove-background", response_model=Generation)
+async def remove_background(payload: RemoveBackgroundRequest, user_id: UUID = Depends(require_user)):
+    png_bytes = await _run_cutout_bytes(payload.image)
 
     try:
         image_path, public_url = upload_image(user_id, png_bytes)
