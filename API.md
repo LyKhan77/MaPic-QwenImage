@@ -75,18 +75,61 @@ Used by the frontend to recover model loading progress after a page refresh. If 
 
 ---
 
-### `POST /api/load`
-Manually load the Qwen-Image 2.1 model into GPU memory.
+### `GET /api/system/gpus`
+List configured ComfyUI GPU worker nodes, their online status, free/total VRAM, and which node is active/default.
 
 **Response:**
 ```json
 {
-  "status": "ready"
+  "active_gpu": "2",
+  "default_gpu": "2",
+  "gpus": [
+    {
+      "id": "1",
+      "name": "NVIDIA GeForce RTX 5080",
+      "vram_total_mb": 16303,
+      "vram_free_mb": 15923,
+      "online": true,
+      "loaded": false,
+      "active": false,
+      "default": false
+    },
+    {
+      "id": "2",
+      "name": "NVIDIA GeForce RTX 5080",
+      "vram_total_mb": 16303,
+      "vram_free_mb": 15881,
+      "online": true,
+      "loaded": true,
+      "active": true,
+      "default": true
+    }
+  ]
+}
+```
+
+---
+
+### `POST /api/load`
+Manually load the Qwen-Image 2.1 model into GPU memory, optionally targeting/switching to a specific GPU node.
+
+**Request body (optional):** `LoadModelRequest`
+```json
+{
+  "gpu_id": "2"
+}
+```
+
+**Response:**
+```json
+{
+  "status": "ready",
+  "gpu": "2"
 }
 ```
 
 **Description:**
-Blocks until the model is fully loaded. Useful for pre-warming the server before generation requests. If the model is already loaded, it returns immediately.
+Blocks until the model is fully loaded. When `gpu_id` targets a different GPU than the currently active node, the facade checks that the target worker is reachable, unloads VRAM on the previous GPU worker, switches active routing, and warms up the target GPU. Returns `400` for an unknown `gpu_id`, `409` if a generation is currently running, and `502` if the target worker is offline. If called with no body, loads the currently active/default GPU.
 
 ---
 
@@ -422,20 +465,26 @@ Used by the backend's `/api/load/state` proxy endpoint so the frontend can recov
 
 ---
 
+### `GET /v1/system/gpus`
+List all configured ComfyUI GPU workers with live `/system_stats` metrics (`vram_total_mb`, `vram_free_mb`, `online`, `loaded`, `active`, `default`).
+
+---
+
 ### `POST /v1/system/load`
-Load the Qwen-Image 2.1 pipeline into GPU memory.
+Load the Qwen-Image 2.1 pipeline into GPU memory, optionally switching to `gpu_id` in the request body (`{"gpu_id": "2"}`).
 
 **Response:**
 ```json
 {
-  "status": "ready"
+  "status": "ready",
+  "gpu": "2"
 }
 ```
 
 **Description:**
 - Menjalankan *warmup* satu step di 256×256. ComfyUI memuat model saat job pertama dieksekusi, jadi "load" berarti memicu pemuatan itu lebih dulu supaya request pengguna tidak menanggung waktunya.
 - Memuat model Qwen-Image 2.1 GGUF **Q8_0** (7,07 GiB) + text encoder int8 (8,71 GiB) + VAE bf16 (0,63 GiB) dengan *dynamic VRAM loading* — ketiganya dimuat bergantian, bukan bersamaan.
-- Container ComfyUI dipin ke satu GPU lewat `NVIDIA_VISIBLE_DEVICES`.
+- Setiap worker ComfyUI dipin ke satu GPU lewat `NVIDIA_VISIBLE_DEVICES`. Saat berganti `gpu_id`, facade memeriksa status worker target lebih dulu, memanggil `/free` di worker lama, lalu memindahkan routing aktif. Menolak `409` bila ada generasi berjalan dan `400` bila `gpu_id` tidak dikenal.
 - Permintaan di atas `QWEN_MAX_RESOLUTION` ditolak dengan HTTP 400 sehingga host ber-VRAM kecil tidak pernah OOM.
 
 ---
@@ -654,7 +703,9 @@ The server reads its configuration from the environment instead of an env file:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `COMFY_BASE_URL` | `http://comfyui:8188` | Alamat ComfyUI di network internal Docker. |
+| `COMFY_BASE_URL` | `http://comfyui:8188` | Alamat ComfyUI default saat `QWEN_GPU_WORKERS` tidak diset. |
+| `QWEN_GPU_WORKERS` | — (kosong) | Daftar worker multi-GPU dipisah koma (`1=http://comfyui:8188,2=http://comfyui-gpu2:8188`). Bila kosong, fallback ke `COMFY_BASE_URL`. |
+| `QWEN_DEFAULT_GPU` | `1` (atau worker pertama) | ID node GPU default saat facade start (di `gspe-ai3` diset ke `2`). |
 | `QWEN_GGUF_NAME` | `qwen-image-2.1-Q8_0.gguf` | Nama file model di dalam folder yang di-mount ke ComfyUI. Ganti di sini bila memakai kuantisasi lain. |
 | `QWEN_CLIP_NAME` | `qwen3vl_8b_int8_convrot.safetensors` | Text encoder. |
 | `QWEN_VAE_NAME` | `qwen_image_2.1_vae_bf16.safetensors` | VAE. |
