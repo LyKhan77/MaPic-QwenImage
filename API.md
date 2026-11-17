@@ -288,6 +288,52 @@ curl --fail-with-body --silent --show-error \
 
 ---
 
+### `POST /api/service/remove-background`
+Cutout CPU stateless untuk klien mesin dan MCP — memakai `Authorization: Bearer <MAPIC_SERVICE_TOKEN>`, tanpa login Supabase dan tanpa menulis ke riwayat atau Storage.
+
+**Request body:** `ServiceRemoveBackgroundRequest`
+```json
+{
+  "image": "base64encodedpngorjpeg..."
+}
+```
+
+**Response:** `ServiceImageResponse`
+```json
+{
+  "data": [
+    {
+      "b64_json": "iVBORw0KGgoAAAANSUhEUgAA..."
+    }
+  ]
+}
+```
+
+**Description:**
+- Memakai validasi gambar yang sama dengan `POST /api/remove-background` (PNG/JPEG, maksimal 2 MiB, sisi ≤ 2048 px, piksel ≤ 4.194.304).
+- Berjalan di CPU lewat `_remove_background_lock` tersendiri, tidak menyentuh antrean GPU Qwen-Image. Mengembalikan `429` jika worker cutout sedang memproses gambar lain, `503` jika token kosong atau bobot ONNX tidak tersedia.
+
+---
+
+### `POST /mcp` (MCP Streamable HTTP)
+Endpoint Model Context Protocol (JSON-RPC 2.0 Streamable HTTP) untuk menghubungkan AI agent (Antigravity, Claude Code, Cursor, dll.) langsung ke tool MaPic.
+
+**Authentication:** `Authorization: Bearer <MAPIC_SERVICE_TOKEN>` (aturan sama dengan endpoint service: `503` bila kosong, `401` bila salah/hilang).
+
+**Supported methods:**
+- `initialize` — Mengembalikan `protocolVersion` (`2025-03-26` / `2024-11-05`), `capabilities.tools`, dan `serverInfo`.
+- `notifications/initialized` — Mengembalikan `202 Accepted`.
+- `ping` — Mengembalikan `{}`.
+- `tools/list` — Mendaftarkan 3 tool:
+  - `generate_image` (`prompt`, opsional `images` base64 maks 10, `negative_prompt`, `true_cfg_scale`, `num_inference_steps`, `resolution`)
+  - `remove_background` (`image` base64 PNG/JPEG)
+  - `get_model_status` (cek kesiapan model & node GPU aktif)
+- `tools/call` — Mengembalikan `ImageContent` (`type: "image"`, `mimeType: "image/png"`) + `TextContent` ringkasan metadata. Kesalahan validasi/antrean dikembalikan sebagai `{"isError": true, "content": [{"type": "text", "text": "..."}]}`.
+
+`GET /mcp` mengembalikan `405 Method Not Allowed` (`Allow: POST`).
+
+---
+
 ### `GET /api/generations/status`
 Fetch the current Qwen-Image inference stage.
 
