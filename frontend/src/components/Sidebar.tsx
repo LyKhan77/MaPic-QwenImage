@@ -1,4 +1,4 @@
-import { LogOut, Plus, Trash2, ChevronLeft, ChevronRight, MessageSquare, Menu, Search, X } from 'lucide-react'
+import { LogOut, Plus, Trash2, ChevronLeft, ChevronRight, MessageSquare, Menu, Search, X, Plug } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Generation } from '../types'
 import { cn } from '../lib/utils'
@@ -6,6 +6,7 @@ import { filterHistory } from '../lib/historySearch'
 import { motion } from 'framer-motion'
 import type { Session } from '@supabase/supabase-js'
 import { useEffect, useState } from 'react'
+import ConnectMcpModal from './ConnectMcpModal'
 
 interface SidebarProps {
   session: Session
@@ -25,6 +26,7 @@ export default function Sidebar({ session, history, onSelect, onNewChat, onDelet
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   // Pencarian hanya atas array `history` yang sudah dimuat Dashboard.
   const [query, setQuery] = useState('')
+  const [showMcpModal, setShowMcpModal] = useState(false)
 
   useEffect(() => {
     const mq = window.matchMedia(MOBILE_QUERY)
@@ -197,6 +199,32 @@ export default function Sidebar({ session, history, onSelect, onNewChat, onDelet
           )}
         </div>
 
+        {/* Connect MCP */}
+        <div className="border-t border-border px-2 py-2">
+          <button
+            type="button"
+            onClick={() => {
+              setShowMcpModal(true)
+              if (isMobile) setIsDrawerOpen(false)
+            }}
+            title="Connect MCP"
+            className={cn(
+              "flex w-full items-center rounded-md text-xs font-mono text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+              isCollapsed ? "justify-center p-3" : "justify-between px-3 py-2.5"
+            )}
+          >
+            <span className="flex items-center gap-2">
+              <Plug size={15} />
+              {!isCollapsed && <span>Connect MCP</span>}
+            </span>
+            {!isCollapsed && (
+              <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-primary">
+                MCP
+              </span>
+            )}
+          </button>
+        </div>
+
         {/* User Footer */}
         <div className="border-t border-border p-4 bg-muted/20">
           <div className={cn("flex items-center gap-2", isCollapsed ? "flex-col" : "flex-row")}>
@@ -231,6 +259,8 @@ export default function Sidebar({ session, history, onSelect, onNewChat, onDelet
           </div>
         </div>
       </motion.div>
+
+      <ConnectMcpModal open={showMcpModal} onClose={() => setShowMcpModal(false)} />
     </>
   )
 }

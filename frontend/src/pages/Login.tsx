@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Eye, EyeOff, Mail, Lock, LogIn, AlertCircle } from 'lucide-react'
+import { Eye, EyeOff, Mail, Lock, LogIn, AlertCircle, Plug } from 'lucide-react'
 import { toast } from 'sonner'
+import ConnectMcpModal from '../components/ConnectMcpModal'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -11,6 +12,7 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false)
   const [isSignUp, setIsSignUp] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
+  const [showMcpModal, setShowMcpModal] = useState(false)
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -191,10 +193,23 @@ export default function Login() {
           </button>
         </div>
 
+        <div className="pt-2 border-t border-white/5 flex justify-center">
+          <button
+            type="button"
+            onClick={() => setShowMcpModal(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-2 text-[11px] font-mono uppercase tracking-wider text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+          >
+            <Plug className="w-3.5 h-3.5" />
+            <span>Connect Agent via MCP</span>
+          </button>
+        </div>
+
         <div className="text-center text-[10px] text-muted-foreground font-mono opacity-50 uppercase">
           Secure Connection Established
         </div>
       </motion.div>
+
+      <ConnectMcpModal open={showMcpModal} onClose={() => setShowMcpModal(false)} />
     </div>
   )
 }
